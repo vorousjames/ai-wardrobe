@@ -15,9 +15,12 @@ jest.mock('../lib/authContext', () => ({
   AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+// Mock navigation prop
+const mockNavigation = { navigate: jest.fn() };
+
 describe('Navigation', () => {
   it('renders auth screens without crashing', () => {
-    const component = render(<LoginScreen />);
+    const component = render(<LoginScreen navigation={mockNavigation} />);
     expect(component).toBeTruthy();
   });
 
