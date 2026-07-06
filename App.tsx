@@ -1,20 +1,101 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { StyleSheet } from 'react-native';
+import LoginScreen from './app/auth/LoginScreen';
+import SignUpScreen from './app/auth/SignUpScreen';
+import WardrobeScreen from './app/tabs/WardrobeScreen';
+import OutfitBuilderScreen from './app/tabs/OutfitBuilderScreen';
+import ProfileScreen from './app/tabs/ProfileScreen';
+import GarmentUploadScreen from './app/wardrobe/GarmentUploadScreen';
+import GarmentDetailScreen from './app/wardrobe/GarmentDetailScreen';
+import BodyScanScreen from './app/onboarding/BodyScanScreen';
+import ScanProgressScreen from './app/onboarding/ScanProgressScreen';
+import RenderResultScreen from './app/outfit/RenderResultScreen';
+import { AuthProvider, useAuth } from './lib/authContext';
 
-export default function App() {
+// Tab Navigator
+const Tab = createBottomTabNavigator();
+
+function TabNavigator() {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <Tab.Navigator>
+      <Tab.Screen 
+        name="Wardrobe" 
+        component={WardrobeScreen} 
+        options={{ 
+          tabBarLabel: 'Wardrobe',
+          tabBarIcon: () => '👕'
+        }} 
+      />
+      <Tab.Screen 
+        name="Outfits" 
+        component={OutfitBuilderScreen} 
+        options={{ 
+          tabBarLabel: 'Outfits',
+          tabBarIcon: () => '✨'
+        }} 
+      />
+      <Tab.Screen 
+        name="Profile" 
+        component={ProfileScreen} 
+        options={{ 
+          tabBarLabel: 'Profile',
+          tabBarIcon: () => '👤'
+        }} 
+      />
+    </Tab.Navigator>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+// Stack Navigator
+const Stack = createNativeStackNavigator();
+
+function AuthStack() {
+  return (
+    <Stack.Navigator>
+      <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="SignUp" component={SignUpScreen} />
+    </Stack.Navigator>
+  );
+}
+
+function MainStack() {
+  return (
+    <Stack.Navigator>
+      <Stack.Screen 
+        name="MainTabs" 
+        component={TabNavigator} 
+        options={{ headerShown: false }} 
+      />
+      <Stack.Screen name="GarmentUpload" component={GarmentUploadScreen} />
+      <Stack.Screen name="GarmentDetail" component={GarmentDetailScreen} />
+      <Stack.Screen name="BodyScan" component={BodyScanScreen} />
+      <Stack.Screen name="ScanProgress" component={ScanProgressScreen} />
+      <Stack.Screen name="RenderResult" component={RenderResultScreen} />
+    </Stack.Navigator>
+  );
+}
+
+function RootNavigator() {
+  const { session, loading } = useAuth();
+
+  if (loading) {
+    return null; // Show a loading spinner here if needed
+  }
+
+  return (
+    <NavigationContainer>
+      {session ? <MainStack /> : <AuthStack />}
+    </NavigationContainer>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <RootNavigator />
+    </AuthProvider>
+  );
+}
