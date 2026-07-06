@@ -1,18 +1,32 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
-import { useAuth } from '../../lib/authContext';
+import { supabase } from '../../lib/supabase';
 
-export default function LoginScreen() {
+export default function LoginScreen({ navigation }: { navigation: any }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const { signIn } = useAuth();
+  const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
+    setLoading(true);
     try {
-      await signIn(email, password);
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        Alert.alert('Login failed', error.message);
+      }
     } catch (error: any) {
       Alert.alert('Login failed', error.message);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const handleSignUp = () => {
+    navigation.navigate('SignUp');
   };
 
   return (
@@ -25,6 +39,7 @@ export default function LoginScreen() {
         onChangeText={setEmail}
         keyboardType="email-address"
         autoCapitalize="none"
+        autoCorrect={false}
       />
       <TextInput
         style={styles.input}
@@ -32,9 +47,14 @@ export default function LoginScreen() {
         value={password}
         onChangeText={setPassword}
         secureTextEntry
+        autoCapitalize="none"
+        autoCorrect={false}
       />
-      <TouchableOpacity style={styles.button} onPress={handleLogin}>
-        <Text style={styles.buttonText}>Login</Text>
+      <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
+        <Text style={styles.buttonText}>{loading ? 'Logging in...' : 'Login'}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.linkButton} onPress={handleSignUp}>
+        <Text style={styles.linkButtonText}>Don't have an account? Sign Up</Text>
       </TouchableOpacity>
     </View>
   );
@@ -64,9 +84,18 @@ const styles = StyleSheet.create({
     padding: 15,
     borderRadius: 5,
     alignItems: 'center',
+    marginTop: 10,
   },
   buttonText: {
     color: 'white',
+    fontWeight: 'bold',
+  },
+  linkButton: {
+    marginTop: 15,
+    alignItems: 'center',
+  },
+  linkButtonText: {
+    color: '#007AFF',
     fontWeight: 'bold',
   },
 });

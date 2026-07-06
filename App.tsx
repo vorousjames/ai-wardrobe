@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { StyleSheet } from 'react-native';
 import LoginScreen from './app/auth/LoginScreen';
 import SignUpScreen from './app/auth/SignUpScreen';
 import WardrobeScreen from './app/tabs/WardrobeScreen';
