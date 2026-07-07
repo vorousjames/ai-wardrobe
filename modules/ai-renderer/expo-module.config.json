@@ -1,0 +1,7 @@
+{
+  "name": "ai-renderer",
+  "platforms": ["ios"],
+  "ios": {
+    "modules": ["AiRendererModule"]
+  }
+}

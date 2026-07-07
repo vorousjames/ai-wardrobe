@@ -2,7 +2,16 @@ import { RenderService, RenderProgressCallback } from './RenderService';
 import { ModelManager } from './ModelManager';
 import { GarmentConditioningService } from './GarmentConditioningService';
 import { LoRAService } from './LoRAService';
-import { RenderRequest, RenderResult, RenderStatus } from './types';
+import { RenderRequest, RenderResult, RenderStatus, AiRendererModule } from './types';
+
+// Try to import the native module, fallback to mock if not available
+let AiRenderer: AiRendererModule | null = null;
+try {
+  // @ts-ignore
+  AiRenderer = require('../../modules/ai-renderer').default;
+} catch (error) {
+  console.warn('Native AI renderer not available, using mock implementation');
+}
 
 export class RenderPipeline {
   private renderService: RenderService;
@@ -65,24 +74,70 @@ export class RenderPipeline {
   }
 
   /**
-   * Run the actual inference (mock implementation)
+   * Run the actual inference (uses native module when available, fallback to mock)
    */
   private async runInference(
     request: RenderRequest,
     onProgress?: RenderProgressCallback
   ): Promise<RenderResult> {
+    // Use native module if available
+    if (AiRenderer) {
+      try {
+        onProgress?.({ 
+          status: RenderStatus.PROCESSING, 
+          progress: 60, 
+          message: 'Using native AI renderer' 
+        });
+        
+        // Check if model is loaded, if not load it
+        if (!AiRenderer.isModelLoaded()) {
+          onProgress?.({ 
+            status: RenderStatus.PROCESSING, 
+            progress: 65, 
+            message: 'Loading model' 
+          });
+          // In a real implementation, you would provide the actual model path
+          // await AiRenderer.loadModel('/path/to/model');
+        }
+        
+        // Prepare generation options
+        // In a real implementation, you would map the request to proper options
+        const prompt = `fashion model wearing ${request.garment_ids.length} items, ${request.pose} pose`;
+        
+        // Generate image using native module
+        const imagePath = await AiRenderer.generate(prompt);
+        
+        // Generate result
+        const cacheKey = `render_${request.user_id}_${request.garment_ids.join('_')}_${Date.now()}`;
+        
+        return {
+          image_url: `file://${imagePath}`,
+          cache_key: cacheKey,
+          timestamp: Date.now()
+        };
+      } catch (error) {
+        console.error('Native rendering failed, falling back to mock:', error);
+        onProgress?.({ 
+          status: RenderStatus.PROCESSING, 
+          progress: 70, 
+          message: 'Native rendering failed, using mock' 
+        });
+      }
+    }
+    
+    // Fallback to mock implementation
     // In a real implementation, this would:
     // 1. Load the Stable Diffusion model with user LoRA
     // 2. Apply garment conditioning data
     // 3. Run the inference with the specified pose
     // 4. Return the generated image
     
-    // For now, simulate the process with delays
+    // Simulate the process with delays
     for (let i = 0; i <= 5; i++) {
       await new Promise(resolve => setTimeout(resolve, 300));
       onProgress?.({ 
         status: RenderStatus.PROCESSING, 
-        progress: 50 + (i * 10), 
+        progress: 70 + (i * 6), 
         message: `Generating image (${i}/5)` 
       });
     }

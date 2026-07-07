@@ -1,0 +1,22 @@
+{
+  "name": "ai-renderer",
+  "version": "1.0.0",
+  "description": "Native module for on-device AI rendering using Apple's ml-stable-diffusion",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": [
+    "src",
+    "ios",
+    "expo-module.config.json"
+  ],
+  "keywords": [
+    "expo",
+    "native",
+    "ai",
+    "stable-diffusion",
+    "ios"
+  ],
+  "peerDependencies": {
+    "expo": "*"
+  }
+}
