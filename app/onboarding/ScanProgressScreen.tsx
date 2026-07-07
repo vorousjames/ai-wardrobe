@@ -50,6 +50,10 @@ export default function ScanProgressScreen() {
     navigation.navigate('MainTabs' as never);
   };
 
+  const goBack = () => {
+    navigation.navigate('MainTabs' as never);
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Scan Progress</Text>
@@ -61,6 +65,9 @@ export default function ScanProgressScreen() {
           <Text style={styles.stateDescription}>{message || 'An error occurred during processing.'}</Text>
           <TouchableOpacity style={styles.button} onPress={retryScan}>
             <Text style={styles.buttonText}>Retry Scan</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.backButton} onPress={goBack}>
+            <Text style={styles.backButtonText}>Back to Home</Text>
           </TouchableOpacity>
         </View>
       ) : status === 'complete' ? (
@@ -85,6 +92,9 @@ export default function ScanProgressScreen() {
             <View style={[styles.progressFill, { width: `${Math.min(progress, 100)}%` }]} />
           </View>
           <Text style={styles.progressText}>{progress}%</Text>
+          <TouchableOpacity style={styles.backButton} onPress={goBack}>
+            <Text style={styles.backButtonText}>Back to Home</Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -160,5 +170,18 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  backButton: {
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
+  },
+  backButtonText: {
+    color: '#666',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

@@ -204,6 +204,17 @@ export default function BodyScanScreen() {
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#007AFF" />
         <Text style={styles.uploadingText}>Uploading your scan...</Text>
+        <TouchableOpacity
+          style={styles.cancelUploadButton}
+          onPress={() => {
+            setPhase('camera');
+            setVideoUri(null);
+            setIsUploading(false);
+            setError(null);
+          }}
+        >
+          <Text style={styles.cancelUploadText}>Cancel</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -430,5 +441,19 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  cancelUploadButton: {
+    marginTop: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    alignSelf: 'center',
+  },
+  cancelUploadText: {
+    color: '#666',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
