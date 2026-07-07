@@ -1,18 +1,26 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/authContext';
 import { useNavigation } from '@react-navigation/native';
 
 export default function BodyScanScreen() {
   const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { session } = useAuth();
   const navigation = useNavigation();
 
   const handleStartScan = () => {
-    // For MVP, skip camera recording and go directly to progress
-    // Camera recording will be implemented in a future phase
-    navigation.navigate('ScanProgress' as never);
+    try {
+      // For MVP, skip camera recording and go directly to progress
+      // Camera recording will be implemented in a future phase
+      navigation.navigate('ScanProgress' as never);
+    } catch (error) {
+      console.error('Navigation error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to navigate to scan progress';
+      setError(errorMessage);
+      Alert.alert('Error', errorMessage);
+    }
   };
 
   return (
@@ -30,6 +38,18 @@ export default function BodyScanScreen() {
         <Text style={styles.bullet}>• Keep your arms slightly away from your body</Text>
       </View>
 
+      {error && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={() => setError(null)}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      
       {isUploading ? (
         <View style={styles.uploadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
@@ -98,6 +118,30 @@ const styles = StyleSheet.create({
   buttonText: {
     color: 'white',
     fontSize: 16,
+    fontWeight: 'bold',
+  },
+  errorContainer: {
+    backgroundColor: '#ffebee',
+    padding: 15,
+    borderRadius: 8,
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  errorText: {
+    color: '#c62828',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  retryButton: {
+    backgroundColor: '#c62828',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 14,
     fontWeight: 'bold',
   },
 });

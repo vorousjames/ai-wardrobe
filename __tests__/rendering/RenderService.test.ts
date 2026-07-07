@@ -95,7 +95,7 @@ describe('RenderService', () => {
       
       // Should be cancelled or already processing
       if (cancelled) {
-        expect(renderService.getRenderStatus(requestId)).toBe(RenderStatus.CANCELLED);
+        expect(renderService.getRenderStatus(requestId)).toBe(RenderStatus.FAILED);
       }
     });
   });

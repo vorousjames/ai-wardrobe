@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text } from 'react-native';
+import { Text, Alert } from 'react-native';
 import LoginScreen from './app/auth/LoginScreen';
 import SignUpScreen from './app/auth/SignUpScreen';
 import WardrobeScreen from './app/tabs/WardrobeScreen';
@@ -15,6 +15,8 @@ import ScanProgressScreen from './app/onboarding/ScanProgressScreen';
 import RenderResultScreen from './app/outfit/RenderResultScreen';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { supabase } from './lib/supabase';
+import { LoRAService } from './lib/rendering/LoRAService';
+import { RenderPipeline } from './lib/rendering/RenderPipeline';
 
 const Tab = createBottomTabNavigator();
 
@@ -85,6 +87,7 @@ function RootNavigator() {
   const { session, loading } = useAuth();
   const [initialRoute, setInitialRoute] = useState<string | null>(null);
   const [routeLoading, setRouteLoading] = useState(true);
+  const [loraLoading, setLoraLoading] = useState(false);
 
   useEffect(() => {
     if (loading) return;
@@ -92,6 +95,27 @@ function RootNavigator() {
     const determineInitialRoute = async () => {
       if (session) {
         try {
+          // Pre-download LoRA weights in background
+          setLoraLoading(true);
+          const loraService = new LoRAService();
+          try {
+            await loraService.loadUserLoRA(session.user.id);
+            console.log('LoRA weights pre-downloaded successfully');
+          } catch (error) {
+            console.warn('Failed to pre-download LoRA weights:', error);
+          } finally {
+            setLoraLoading(false);
+          }
+
+          // Warm up render pipeline in background
+          const renderPipeline = new RenderPipeline();
+          try {
+            await renderPipeline.warmUp();
+            console.log('Render pipeline warmed up successfully');
+          } catch (error) {
+            console.warn('Failed to warm up render pipeline:', error);
+          }
+
           // Check user's body scan status
           const { data, error } = await supabase
             .from('profiles')

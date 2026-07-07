@@ -50,8 +50,10 @@ export default function RenderResultScreen() {
       
       setResult(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error occurred');
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      setError(errorMessage);
       setStatus(RenderStatus.FAILED);
+      console.error('Render error:', err);
     }
   };
 

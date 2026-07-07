@@ -116,14 +116,15 @@ export default function GarmentDetailScreen({ navigation }: { navigation: any })
                 .eq('id', garment.id)
                 .eq('user_id', session.user.id);
 
-              if (deleteError) throw deleteError;
+              if (deleteError) throw new Error(`Database delete failed: ${deleteError.message || 'Unknown error'}`);
 
               // Navigate back to wardrobe
               navigation.navigate('MainTabs', { screen: 'Wardrobe' });
               Alert.alert('Success', 'Garment deleted successfully');
             } catch (error) {
               console.error('Error deleting garment:', error);
-              Alert.alert('Error', 'Failed to delete garment');
+              const errorMessage = error instanceof Error ? error.message : 'Failed to delete garment';
+              Alert.alert('Error', errorMessage);
             }
           },
         },

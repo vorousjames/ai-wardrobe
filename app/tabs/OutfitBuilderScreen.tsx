@@ -29,6 +29,7 @@ export default function OutfitBuilderScreen() {
   const [garments, setGarments] = useState<Garment[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [selectedGarments, setSelectedGarments] = useState<Record<string, string>>({});
   const { session } = useAuth();
   const navigation: any = useNavigation();
@@ -37,17 +38,20 @@ export default function OutfitBuilderScreen() {
     if (!session?.user) return;
 
     try {
+      setError(null);
       const { data, error } = await supabase
         .from('garments')
         .select('*')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) throw new Error(`Database query failed: ${error.message || 'Unknown error'}`);
       setGarments(data || []);
     } catch (error) {
       console.error('Error fetching garments:', error);
-      Alert.alert('Error', 'Failed to fetch garments');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch garments';
+      setError(errorMessage);
+      Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -148,6 +152,19 @@ export default function OutfitBuilderScreen() {
     </View>
   );
 
+  const renderErrorState = () => (
+    <View style={styles.emptyStateContainer}>
+      <Text style={styles.emptyStateText}>Failed to load garments</Text>
+      <Text style={styles.errorText}>{error}</Text>
+      <TouchableOpacity
+        style={styles.addButton}
+        onPress={fetchGarments}
+      >
+        <Text style={styles.addButtonText}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   const renderLoadingState = () => (
     <View style={styles.loadingContainer}>
       <ActivityIndicator size="large" color="#007AFF" />
@@ -171,7 +188,9 @@ export default function OutfitBuilderScreen() {
         }
         contentContainerStyle={styles.scrollContainer}
       >
-        {hasGarments ? (
+        {error ? (
+          renderErrorState()
+        ) : hasGarments ? (
           <>
             <Text style={styles.title}>Build Your Outfit</Text>
             {GARMENT_TYPES.map(type => 
@@ -285,6 +304,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 20,
     color: '#666',
+  },
+  errorText: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 20,
+    color: '#FF3B30',
   },
   addButton: {
     backgroundColor: '#007AFF',

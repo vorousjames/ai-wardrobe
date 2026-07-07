@@ -12,9 +12,11 @@ import {
   Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/authContext';
 import { useNavigation } from '@react-navigation/native';
+import { SegmentationService } from '../../lib/segmentation/SegmentationService';
 
 
 export default function GarmentUploadScreen({ navigation }: { navigation: any }) {
@@ -61,11 +63,17 @@ export default function GarmentUploadScreen({ navigation }: { navigation: any })
       }
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        setImage(result.assets[0].uri);
+        // Compress image to max 1024x1024
+        const compressedImage = await ImageManipulator.manipulateAsync(
+          result.assets[0].uri,
+          [{ resize: { width: 1024, height: 1024 } }],
+          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+        );
+        setImage(compressedImage.uri);
       }
     } catch (error) {
       console.error('Error picking image:', error);
-      Alert.alert('Error', 'Failed to pick image');
+      Alert.alert('Error', 'Failed to pick image: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
 
@@ -93,7 +101,7 @@ export default function GarmentUploadScreen({ navigation }: { navigation: any })
         .upload(fileName, blob);
 
       if (uploadError) {
-        throw uploadError;
+        throw new Error(`Upload failed: ${uploadError.message || 'Unknown error'}`);
       }
 
       // Get public URL for the uploaded image
@@ -118,31 +126,20 @@ export default function GarmentUploadScreen({ navigation }: { navigation: any })
       if (insertError) {
         // If database insert fails, try to delete the uploaded image
         await supabase.storage.from('garments').remove([fileName]);
-        throw insertError;
+        throw new Error(`Database insert failed: ${insertError.message || 'Unknown error'}`);
       }
 
       // Trigger segmentation pipeline
       if (garmentData && garmentData.length > 0) {
         const garmentId = garmentData[0].id;
         try {
-          // In a production environment, this would call your segmentation service
-          // For now, we'll just log that it should be triggered
-          console.log(`Segmentation pipeline triggered for garment ID: ${garmentId}`);
-          
-          // Example of how you might trigger the segmentation service:
-          // await fetch('YOUR_SEGMENTATION_SERVICE_URL/trigger', {
-          //   method: 'POST',
-          //   headers: {
-          //     'Content-Type': 'application/json',
-          //   },
-          //   body: JSON.stringify({
-          //     garment_id: garmentId,
-          //     image_url: urlData.publicUrl,
-          //   }),
-          // });
+          // Queue garment for segmentation (batching)
+          const segmentationService = SegmentationService.getInstance();
+          await segmentationService.queueSegmentation(garmentId);
         } catch (segmentationError) {
-          console.error('Failed to trigger segmentation pipeline:', segmentationError);
+          console.error('Failed to queue segmentation pipeline:', segmentationError);
           // Note: We don't throw here because the garment upload was successful
+          Alert.alert('Warning', 'Garment uploaded but segmentation failed. You can try again later.');
         }
       }
 
@@ -151,7 +148,8 @@ export default function GarmentUploadScreen({ navigation }: { navigation: any })
       navigation.navigate('MainTabs', { screen: 'Wardrobe' });
     } catch (error) {
       console.error('Upload error:', error);
-      Alert.alert('Error', 'Failed to upload garment: ' + (error as Error).message);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to upload garment';
+      Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
     }

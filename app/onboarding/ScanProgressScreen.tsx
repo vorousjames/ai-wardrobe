@@ -25,6 +25,8 @@ export default function ScanProgressScreen() {
 
         if (error) {
           console.error('Error fetching profile status:', error);
+          // Handle network error
+          setStatus('failed');
           return;
         }
 
@@ -52,6 +54,8 @@ export default function ScanProgressScreen() {
         }
       } catch (error) {
         console.error('Error polling profile status:', error);
+        // Handle network error
+        setStatus('failed');
       }
     }, 5000); // Poll every 5 seconds
 

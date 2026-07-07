@@ -5,10 +5,11 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   Alert,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/authContext';
 import { useNavigation } from '@react-navigation/native';
@@ -18,6 +19,7 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
   const [garments, setGarments] = useState<Garment[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { session } = useAuth();
   const nav = useNavigation();
 
@@ -25,6 +27,7 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
     if (!session?.user) return;
 
     try {
+      setError(null);
       const { data, error } = await supabase
         .from('garments')
         .select('*')
@@ -35,7 +38,9 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
       setGarments(data || []);
     } catch (error) {
       console.error('Error fetching garments:', error);
-      Alert.alert('Error', 'Failed to fetch garments');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch garments';
+      setError(errorMessage);
+      Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -57,7 +62,13 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
       onPress={() => navigation.navigate('GarmentDetail', { id: item.id })}
     >
       <View style={styles.imageContainer}>
-        <Image source={{ uri: item.image_url }} style={styles.garmentImage} resizeMode="cover" />
+        <Image 
+          source={{ uri: item.image_url }} 
+          style={styles.garmentImage} 
+          contentFit="cover"
+          placeholder={{ blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' }}
+          transition={200}
+        />
         <View style={[styles.typeBadge, { backgroundColor: getTypeColor(item.type) }]}>
           <Text style={styles.typeBadgeText}>{item.type}</Text>
         </View>
@@ -92,6 +103,19 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
     </View>
   );
 
+  const renderErrorState = () => (
+    <View style={styles.emptyStateContainer}>
+      <Text style={styles.emptyStateText}>Failed to load garments</Text>
+      <Text style={styles.errorText}>{error}</Text>
+      <TouchableOpacity
+        style={styles.uploadButton}
+        onPress={fetchGarments}
+      >
+        <Text style={styles.uploadButtonText}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   const renderSkeleton = () => (
     <View style={styles.skeletonContainer}>
       {[...Array(4)].map((_, index) => (
@@ -112,7 +136,7 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
-        ListEmptyComponent={loading ? renderSkeleton : renderEmptyState}
+        ListEmptyComponent={loading ? renderSkeleton : (error ? renderErrorState : renderEmptyState)}
         ListHeaderComponent={
           <View style={styles.header}>
             <Text style={styles.title}>My Wardrobe</Text>
@@ -218,6 +242,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 20,
     color: '#666',
+  },
+  errorText: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 20,
+    color: '#FF3B30',
   },
   uploadButton: {
     backgroundColor: '#007AFF',
