@@ -29,3 +29,14 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 
 jest.mock('react-native-screens', () => ({}));
+
+jest.mock('expo-image', () => ({
+  Image: 'Image',
+  ContentFit: { contain: 'contain', cover: 'cover' },
+  Transition: { none: 0 },
+}));
+
+jest.mock('expo-image-manipulator', () => ({
+  manipulateAsync: jest.fn().mockResolvedValue({ uri: 'compressed.jpg' }),
+  SaveFormat: { JPEG: 'jpeg', PNG: 'png' },
+}));

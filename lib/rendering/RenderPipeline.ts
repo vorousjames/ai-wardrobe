@@ -6,13 +6,18 @@ import { RenderRequest, RenderResult, RenderStatus, AiRendererModule } from './t
 import { supabase } from '../supabase';
 import { RenderCache } from '../database.types';
 
-// Try to import the native module, fallback to mock if not available
+// Lazy import of native module to avoid issues in test environment
 let AiRenderer: AiRendererModule | null = null;
-try {
-  // @ts-ignore
-  AiRenderer = require('../../modules/ai-renderer').default;
-} catch (error) {
-  console.warn('Native AI renderer not available, using mock implementation');
+function getAiRenderer(): AiRendererModule | null {
+  if (AiRenderer !== null) return AiRenderer;
+  try {
+    // @ts-ignore
+    AiRenderer = require('../../modules/ai-renderer').default;
+  } catch (error) {
+    // Native module not available (e.g., in test environment)
+    AiRenderer = null;
+  }
+  return AiRenderer;
 }
 
 export class RenderPipeline {
@@ -184,7 +189,8 @@ export class RenderPipeline {
   ): Promise<RenderResult> {
     try {
       // Use native module if available
-      if (AiRenderer) {
+      const renderer = getAiRenderer();
+    if (renderer) {
         try {
           onProgress?.({ 
             status: RenderStatus.PROCESSING, 
@@ -193,7 +199,7 @@ export class RenderPipeline {
           });
           
           // Check if model is loaded, if not load it
-          if (!AiRenderer.isModelLoaded()) {
+          if (!renderer.isModelLoaded()) {
             onProgress?.({ 
               status: RenderStatus.PROCESSING, 
               progress: 65, 
@@ -208,7 +214,7 @@ export class RenderPipeline {
           const prompt = `fashion model wearing ${request.garment_ids.length} items, ${request.pose} pose`;
           
           // Generate image using native module
-          const imagePath = await AiRenderer.generate(prompt);
+          const imagePath = await renderer.generate(prompt);
           
           // Generate result
           const cacheKey = this.generateCacheKey(request);
