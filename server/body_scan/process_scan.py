@@ -3,20 +3,13 @@
 Body scan processing pipeline for ai-wardrobe.
 Runs on HeavenScape VPS (68.183.151.153) — shared resource, not dedicated.
 
-Pipeline:
-1. Download 360° video from Supabase Storage
-2. Extract frames using ffmpeg
-3. Run MediaPipe Pose for body landmarks
-4. Calculate body measurements from landmarks
-5. Update Supabase profile with measurements + status
+Reports real progress to Supabase so the app shows accurate status.
 
 Usage:
-  source /root/ai-wardrobe-venv/bin/activate
-  python3 process_scan.py <user_id> <scan_id>
+  /root/ai-wardrobe-venv/bin/python3 process_scan.py <user_id> <scan_id>
 
-Environment variables (set in /root/ai-wardrobe-venv/.env or passed inline):
-  SUPABASE_URL=https://tmcfiscdluwwpkcaeyky.supabase.co
-  SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Environment:
+  SUPABASE_URL, SUPABASE_SERVICE_KEY
 """
 
 import os
@@ -26,13 +19,17 @@ import math
 import subprocess
 import tempfile
 import logging
+import time
 from pathlib import Path
 from typing import Optional
 
-import mediapipe as mp
 import cv2
 import numpy as np
 from supabase import create_client, Client
+
+from mediapipe.tasks import python as mp_tasks
+from mediapipe.tasks.python import vision
+from mediapipe.framework.formats import landmark_pb2
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
@@ -43,56 +40,31 @@ BODY_SCANS_BUCKET = "body-scans"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("body-scan")
 
-# ── MediaPipe Setup ────────────────────────────────────────────────────────
+# ── Progress Reporting ─────────────────────────────────────────────────────
 
-mp_pose = mp.solutions.pose
-pose = mp_pose.Pose(
-    static_image_mode=True,
-    model_complexity=1,       # 0=lite, 1=full, 2=heavy
-    enable_segmentation=False,
-    min_detection_confidence=0.5,
-)
-
-# Landmark indices for measurement calculations
-LANDMARK_INDICES = {
-    "nose": 0,
-    "left_eye": 1, "right_eye": 2,
-    "left_ear": 3, "right_ear": 4,
-    "left_shoulder": 11, "right_shoulder": 12,
-    "left_elbow": 13, "right_elbow": 14,
-    "left_wrist": 15, "right_wrist": 16,
-    "left_hip": 23, "right_hip": 24,
-    "left_knee": 25, "right_knee": 26,
-    "left_ankle": 27, "right_ankle": 28,
-    "left_heel": 29, "right_heel": 30,
-    "left_foot_index": 31, "right_foot_index": 32,
-}
-
-# ── Helpers ─────────────────────────────────────────────────────────────────
-
-def get_landmark(landmarks, idx):
-    """Get (x, y, z, visibility) for a landmark index."""
-    lm = landmarks[idx]
-    return (lm.x, lm.y, lm.z, lm.visibility)
+def report_progress(supabase: Client, user_id: str, pct: int, message: str):
+    """Update the user's profile with current progress."""
+    try:
+        supabase.table("profiles").update({
+            "body_scan_progress": pct,
+            "body_scan_message": message,
+            "body_scan_updated_at": "now()",
+        }).eq("id", user_id).execute()
+        logger.info(f"Progress: {pct}% - {message}")
+    except Exception as e:
+        logger.warning(f"Failed to report progress: {e}")
 
 
-def distance_3d(a, b):
-    """Euclidean distance between two 3D points."""
-    return math.sqrt((a[0] - b[0])**2 + (a[1] - b[1])**2 + (a[2] - b[2])**2)
-
-
-def distance_2d(a, b):
-    """Euclidean distance between two 2D points (x, y only)."""
-    return math.sqrt((a[0] - b[0])**2 + (a[1] - b[1])**2)
-
-
-def pixel_distance(landmarks, idx_a, idx_b, img_w, img_h):
-    """Distance in pixels between two landmarks."""
-    a = get_landmark(landmarks, idx_a)
-    b = get_landmark(landmarks, idx_b)
-    ax_px, ay_px = a[0] * img_w, a[1] * img_h
-    bx_px, by_px = b[0] * img_w, b[1] * img_h
-    return math.sqrt((ax_px - bx_px)**2 + (ay_px - by_px)**2)
+def mark_status(supabase: Client, user_id: str, status: str, pct: int = 0, msg: str = ""):
+    """Update status + progress atomically."""
+    data = {
+        "body_scan_status": status,
+        "body_scan_progress": pct,
+        "body_scan_message": msg,
+        "body_scan_updated_at": "now()",
+    }
+    supabase.table("profiles").update(data).eq("id", user_id).execute()
+    logger.info(f"Status: {status} ({pct}%) - {msg}")
 
 
 # ── Step 1: Download video ─────────────────────────────────────────────────
@@ -100,13 +72,15 @@ def pixel_distance(landmarks, idx_a, idx_b, img_w, img_h):
 def download_video(supabase: Client, user_id: str, scan_id: str, dest: Path) -> Path:
     """Download video from Supabase Storage to local temp file."""
     file_path = f"body-scan/{user_id}/{scan_id}.mp4"
-    logger.info(f"Downloading {file_path}...")
+    report_progress(supabase, user_id, 5, f"Downloading video...")
 
     with open(dest, "wb") as f:
         res = supabase.storage.from_(BODY_SCANS_BUCKET).download(file_path)
         f.write(res)
 
-    logger.info(f"Downloaded to {dest} ({dest.stat().st_size / 1e6:.1f} MB)")
+    size_mb = dest.stat().st_size / 1e6
+    logger.info(f"Downloaded to {dest} ({size_mb:.1f} MB)")
+    report_progress(supabase, user_id, 10, f"Video downloaded ({size_mb:.1f} MB)")
     return dest
 
 
@@ -114,10 +88,19 @@ def download_video(supabase: Client, user_id: str, scan_id: str, dest: Path) -> 
 
 def extract_frames(video_path: Path, output_dir: Path, interval: int = 10) -> list[Path]:
     """Extract frames at regular intervals using ffmpeg."""
-    logger.info(f"Extracting frames every {interval} frames...")
     output_dir.mkdir(parents=True, exist_ok=True)
-
     pattern = str(output_dir / "frame_%05d.jpg")
+
+    # Get total frame count first
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-count_packets", "-show_entries", "stream=nb_read_packets",
+         "-of", "csv=p=0", str(video_path)],
+        capture_output=True, text=True, check=True
+    )
+    total_frames = int(probe.stdout.strip()) if probe.stdout.strip() else 300
+    expected_frames = max(total_frames // interval, 1)
+
     cmd = [
         "ffmpeg", "-i", str(video_path),
         "-vf", f"select=not(mod(n\\,{interval}))",
@@ -128,125 +111,126 @@ def extract_frames(video_path: Path, output_dir: Path, interval: int = 10) -> li
     subprocess.run(cmd, capture_output=True, check=True)
 
     frames = sorted(output_dir.glob("frame_*.jpg"))
-    logger.info(f"Extracted {len(frames)} frames")
+    logger.info(f"Extracted {len(frames)} frames from ~{total_frames} total")
     return frames
 
 
 # ── Step 3: Detect pose ────────────────────────────────────────────────────
 
-def detect_pose_in_frames(frames: list[Path]) -> list[dict]:
-    """Run MediaPipe Pose on each frame and collect landmarks."""
-    logger.info("Running MediaPipe Pose on frames...")
-    all_landmarks = []
+def detect_pose_in_frames(frames: list[Path], supabase: Client, user_id: str) -> list[dict]:
+    """Run MediaPipe PoseLandmarker on each frame."""
+    report_progress(supabase, user_id, 20, "Loading pose detection model...")
 
-    for frame_path in frames:
+    model_path = "/root/ai-wardrobe/pose_landmarker_lite.task"
+    if not os.path.exists(model_path):
+        # Download the model
+        import urllib.request
+        url = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
+        urllib.request.urlretrieve(url, model_path)
+        logger.info(f"Downloaded pose model to {model_path}")
+
+    options = vision.PoseLandmarkerOptions(
+        base_options=mp_tasks.BaseOptions(model_asset_path=model_path),
+        running_mode=vision.RunningMode.IMAGE,
+        min_pose_detection_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+    landmarker = vision.PoseLandmarker.create_from_options(options)
+
+    all_landmarks = []
+    total = len(frames)
+    start_pct = 25
+    end_pct = 70
+
+    for i, frame_path in enumerate(frames):
         img = cv2.imread(str(frame_path))
         if img is None:
             continue
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
         h, w = img.shape[:2]
+        mp_image = mp_tasks.Image(image_format=mp_tasks.ImageFormat.SRGB, data=img)
+        result = landmarker.detect(mp_image)
 
-        results = pose.process(img_rgb)
-        if results.pose_landmarks:
-            landmarks = results.pose_landmarks.landmark
-            all_landmarks.append({
-                "landmarks": [(lm.x, lm.y, lm.z, lm.visibility) for lm in landmarks],
-                "img_w": w,
-                "img_h": h,
-            })
+        if result.pose_landmarks:
+            for landmarks in result.pose_landmarks:
+                pts = [(lm.x, lm.y, lm.z, lm.visibility if hasattr(lm, 'visibility') else 1.0)
+                       for lm in landmarks]
+                all_landmarks.append({
+                    "landmarks": pts,
+                    "img_w": w,
+                    "img_h": h,
+                })
 
-    logger.info(f"Pose detected in {len(all_landmarks)}/{len(frames)} frames")
+        # Report progress every 10 frames
+        if i % 10 == 0 or i == total - 1:
+            pct = start_pct + int((end_pct - start_pct) * (i + 1) / total)
+            report_progress(supabase, user_id, pct, f"Analyzing pose... ({i+1}/{total} frames)")
+
+    landmarker.close()
+    logger.info(f"Pose detected in {len(all_landmarks)}/{total} frames")
     return all_landmarks
 
 
 # ── Step 4: Calculate measurements ────────────────────────────────────────
 
 def calculate_measurements(all_landmarks: list[dict]) -> dict:
-    """
-    Calculate body measurements from detected landmarks.
-    Uses the best frame (highest visibility) for each measurement.
-    Returns measurements in centimeters.
-    """
+    """Calculate body measurements from detected landmarks."""
     if not all_landmarks:
         return {"error": "No pose detected in any frame"}
 
     logger.info("Calculating body measurements...")
 
-    # Find the best frame (highest average visibility)
+    # Best frame = highest avg visibility
     best_frame = max(all_landmarks, key=lambda f: np.mean([lm[3] for lm in f["landmarks"] if lm[3] > 0.5]))
     lm = best_frame["landmarks"]
     w, h = best_frame["img_w"], best_frame["img_h"]
 
-    # Reference: pixel-to-cm ratio using shoulder width as reference
-    # Average male shoulder width ~46cm, female ~38cm
-    # We'll use the detected shoulder width in pixels and assume average
-    # Then scale all other measurements proportionally
+    def dist_2d(a, b):
+        return math.sqrt((a[0] - b[0])**2 + (a[1] - b[1])**2)
 
-    left_shoulder = lm[LANDMARK_INDICES["left_shoulder"]]
-    right_shoulder = lm[LANDMARK_INDICES["right_shoulder"]]
-    left_hip = lm[LANDMARK_INDICES["left_hip"]]
-    right_hip = lm[LANDMARK_INDICES["right_hip"]]
-    left_knee = lm[LANDMARK_INDICES["left_knee"]]
-    right_knee = lm[LANDMARK_INDICES["right_knee"]]
-    left_ankle = lm[LANDMARK_INDICES["left_ankle"]]
-    right_ankle = lm[LANDMARK_INDICES["right_ankle"]]
-    left_ear = lm[LANDMARK_INDICES["left_ear"]]
-    right_ear = lm[LANDMARK_INDICES["right_ear"]]
-    left_elbow = lm[LANDMARK_INDICES["left_elbow"]]
-    right_elbow = lm[LANDMARK_INDICES["right_elbow"]]
-    left_wrist = lm[LANDMARK_INDICES["left_wrist"]]
-    right_wrist = lm[LANDMARK_INDICES["right_wrist"]]
-    left_foot = lm[LANDMARK_INDICES["left_foot_index"]]
-    right_foot = lm[LANDMARK_INDICES["right_foot_index"]]
-    nose = lm[LANDMARK_INDICES["nose"]]
+    # Landmark indices
+    LSHOULDER, RSHOULDER = 11, 12
+    LHIP, RHIP = 23, 24
+    LKNEE, RKNEE = 25, 26
+    LANKLE, RANKLE = 27, 28
+    LFOOT, RFOOT = 31, 32
+    LEAR, REAR = 7, 8
+    NOSE = 0
+    LELBOW, RELBOW = 13, 14
+    LWRIST, RWRIST = 15, 16
 
-    # Pixel distances
-    shoulder_px = distance_2d(left_shoulder, right_shoulder)
-    hip_px = distance_2d(left_hip, right_hip)
-    torso_px = distance_2d(
-        ((left_shoulder[0] + right_shoulder[0]) / 2, (left_shoulder[1] + right_shoulder[1]) / 2, 0, 0),
-        ((left_hip[0] + right_hip[0]) / 2, (left_hip[1] + right_hip[1]) / 2, 0, 0),
-    )
-    left_leg_px = distance_2d(left_hip, left_knee) + distance_2d(left_knee, left_ankle)
-    right_leg_px = distance_2d(right_hip, right_knee) + distance_2d(right_knee, right_ankle)
-    left_arm_px = distance_2d(left_shoulder, left_elbow) + distance_2d(left_elbow, left_wrist)
-    right_arm_px = distance_2d(right_shoulder, right_elbow) + distance_2d(right_elbow, right_wrist)
-    head_px = distance_2d(
-        ((left_ear[0] + right_ear[0]) / 2, (left_ear[1] + right_ear[1]) / 2, 0, 0),
-        (nose[0], nose[1], 0, 0),
-    ) * 2  # Approximate full head height
-    height_px = distance_2d(
-        (nose[0], 0, 0, 0),  # Top of head (approximate)
-        ((left_foot[0] + right_foot[0]) / 2, (left_foot[1] + right_foot[1]) / 2, 0, 0),
+    shoulder_px = dist_2d(lm[LSHOULDER], lm[RSHOULDER])
+    hip_px = dist_2d(lm[LHIP], lm[RHIP])
+    mid_shoulder = ((lm[LSHOULDER][0] + lm[RSHOULDER][0]) / 2, (lm[LSHOULDER][1] + lm[RSHOULDER][1]) / 2)
+    mid_hip = ((lm[LHIP][0] + lm[RHIP][0]) / 2, (lm[LHIP][1] + lm[RHIP][1]) / 2)
+    torso_px = dist_2d(mid_shoulder, mid_hip)
+    left_leg_px = dist_2d(lm[LHIP], lm[LKNEE]) + dist_2d(lm[LKNEE], lm[LANKLE])
+    right_leg_px = dist_2d(lm[RHIP], lm[RKNEE]) + dist_2d(lm[RKNEE], lm[RANKLE])
+    left_arm_px = dist_2d(lm[LSHOULDER], lm[LELBOW]) + dist_2d(lm[LELBOW], lm[LWRIST])
+    right_arm_px = dist_2d(lm[RSHOULDER], lm[RELBOW]) + dist_2d(lm[RELBOW], lm[RWRIST])
+    mid_ear = ((lm[LEAR][0] + lm[REAR][0]) / 2, (lm[LEAR][1] + lm[REAR][1]) / 2)
+    head_px = dist_2d(mid_ear, (lm[NOSE][0], lm[NOSE][1])) * 2
+    height_px = dist_2d(
+        (lm[NOSE][0], 0),
+        ((lm[LFOOT][0] + lm[RFOOT][0]) / 2, (lm[LFOOT][1] + lm[RFOOT][1]) / 2),
     )
 
-    # Estimate reference: assume average shoulder width of 42cm
-    # This gives us a pixel-to-cm ratio
     ref_shoulder_cm = 42.0
     px_per_cm = shoulder_px / ref_shoulder_cm if shoulder_px > 0 else 1
 
     measurements = {
         "height_cm": round(height_px / px_per_cm, 1) if height_px > 0 else None,
         "shoulder_width_cm": round(shoulder_px / px_per_cm, 1),
-        "chest_cm": round(shoulder_px / px_per_cm * 1.2, 1),  # Estimate: chest ~1.2x shoulder width
-        "waist_cm": round(hip_px / px_per_cm * 0.9, 1),  # Estimate: waist ~0.9x hip width
+        "chest_cm": round(shoulder_px / px_per_cm * 1.2, 1),
+        "waist_cm": round(hip_px / px_per_cm * 0.9, 1),
         "hip_width_cm": round(hip_px / px_per_cm, 1),
         "torso_length_cm": round(torso_px / px_per_cm, 1),
         "inseam_cm": round(min(left_leg_px, right_leg_px) / px_per_cm, 1),
         "arm_length_cm": round(max(left_arm_px, right_arm_px) / px_per_cm, 1),
-        "neck_cm": round(head_px / px_per_cm * 0.8, 1),  # Estimate
-        "bicep_cm": round(max(
-            distance_2d(left_shoulder, left_elbow),
-            distance_2d(right_shoulder, right_elbow)
-        ) / px_per_cm * 0.35, 1),  # Rough estimate
-        "thigh_cm": round(max(
-            distance_2d(left_hip, left_knee),
-            distance_2d(right_hip, right_knee)
-        ) / px_per_cm * 0.3, 1),  # Rough estimate
-        "calf_cm": round(max(
-            distance_2d(left_knee, left_ankle),
-            distance_2d(right_knee, right_ankle)
-        ) / px_per_cm * 0.25, 1),  # Rough estimate
+        "neck_cm": round(head_px / px_per_cm * 0.8, 1),
+        "bicep_cm": round(max(dist_2d(lm[LSHOULDER], lm[LELBOW]), dist_2d(lm[RSHOULDER], lm[RELBOW])) / px_per_cm * 0.35, 1),
+        "thigh_cm": round(max(dist_2d(lm[LHIP], lm[LKNEE]), dist_2d(lm[RHIP], lm[RKNEE])) / px_per_cm * 0.3, 1),
+        "calf_cm": round(max(dist_2d(lm[LKNEE], lm[LANKLE]), dist_2d(lm[RKNEE], lm[RANKLE])) / px_per_cm * 0.25, 1),
         "frames_analyzed": len(all_landmarks),
         "confidence": round(float(np.mean([lm[3] for lm in best_frame["landmarks"] if lm[3] > 0])), 2),
     }
@@ -255,36 +239,9 @@ def calculate_measurements(all_landmarks: list[dict]) -> dict:
     return measurements
 
 
-# ── Step 5: Update Supabase ────────────────────────────────────────────────
-
-def update_profile(supabase: Client, user_id: str, measurements: dict):
-    """Update the user's profile with measurements and set status to complete."""
-    logger.info(f"Updating profile for user {user_id}...")
-
-    data = {
-        "body_scan_status": "complete",
-        "body_measurements": measurements,
-        "body_scan_updated_at": "now()",
-    }
-
-    result = supabase.table("profiles").update(data).eq("id", user_id).execute()
-    logger.info(f"Profile updated: status=complete")
-    return result
-
-
-def mark_failed(supabase: Client, user_id: str, error_msg: str):
-    """Mark the scan as failed."""
-    logger.error(f"Marking scan as failed: {error_msg}")
-    supabase.table("profiles").update({
-        "body_scan_status": "failed",
-        "body_scan_updated_at": "now()",
-    }).eq("id", user_id).execute()
-
-
 # ── Main Pipeline ──────────────────────────────────────────────────────────
 
 def main(user_id: str, scan_id: str):
-    """Run the full body scan processing pipeline."""
     logger.info(f"=== Starting body scan pipeline ===")
     logger.info(f"User: {user_id}, Scan: {scan_id}")
 
@@ -295,11 +252,7 @@ def main(user_id: str, scan_id: str):
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
     # Mark as processing
-    supabase.table("profiles").update({
-        "body_scan_status": "processing",
-        "body_scan_updated_at": "now()",
-    }).eq("id", user_id).execute()
-    logger.info("Status set to processing")
+    mark_status(supabase, user_id, "processing", 2, "Starting scan processing...")
 
     with tempfile.TemporaryDirectory(prefix="body-scan-") as tmpdir:
         tmp = Path(tmpdir)
@@ -310,31 +263,38 @@ def main(user_id: str, scan_id: str):
             download_video(supabase, user_id, scan_id, video_path)
 
             # Step 2: Extract frames
+            report_progress(supabase, user_id, 12, "Extracting frames from video...")
             frames_dir = tmp / "frames"
             frames = extract_frames(video_path, frames_dir, interval=10)
-
             if not frames:
                 raise Exception("No frames extracted from video")
+            report_progress(supabase, user_id, 18, f"Extracted {len(frames)} frames")
 
             # Step 3: Detect pose
-            landmarks = detect_pose_in_frames(frames)
-
+            landmarks = detect_pose_in_frames(frames, supabase, user_id)
             if not landmarks:
                 raise Exception("No pose detected in any frame")
 
             # Step 4: Calculate measurements
+            report_progress(supabase, user_id, 75, "Calculating body measurements...")
             measurements = calculate_measurements(landmarks)
-
             if "error" in measurements:
                 raise Exception(measurements["error"])
 
-            # Step 5: Update profile
-            update_profile(supabase, user_id, measurements)
+            # Step 5: Save results
+            report_progress(supabase, user_id, 90, "Saving results...")
+            supabase.table("profiles").update({
+                "body_scan_status": "complete",
+                "body_measurements": measurements,
+                "body_scan_progress": 100,
+                "body_scan_message": "Scan complete!",
+                "body_scan_updated_at": "now()",
+            }).eq("id", user_id).execute()
 
             logger.info("=== Body scan pipeline completed successfully ===")
 
         except Exception as e:
-            mark_failed(supabase, user_id, str(e))
+            mark_status(supabase, user_id, "failed", 0, f"Failed: {str(e)}")
             logger.exception("Pipeline failed")
             sys.exit(1)
 
@@ -342,8 +302,5 @@ def main(user_id: str, scan_id: str):
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python3 process_scan.py <user_id> <scan_id>")
-        print("  user_id - Supabase user UUID")
-        print("  scan_id - Scan identifier (filename without .mp4)")
         sys.exit(1)
-
     main(sys.argv[1], sys.argv[2])

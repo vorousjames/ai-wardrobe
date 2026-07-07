@@ -125,6 +125,8 @@ export default function BodyScanScreen() {
         .from('profiles')
         .update({
           body_scan_status: 'uploaded',
+          body_scan_progress: 0,
+          body_scan_message: 'Upload complete, waiting for processing...',
           body_scan_photos: [publicUrl],
           body_scan_updated_at: new Date().toISOString(),
         })

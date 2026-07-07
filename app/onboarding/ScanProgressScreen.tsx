@@ -5,62 +5,42 @@ import { useAuth } from '../../lib/authContext';
 import { useNavigation } from '@react-navigation/native';
 
 export default function ScanProgressScreen() {
-  const [status, setStatus] = useState<'uploading' | 'processing' | 'complete' | 'failed'>('uploading');
+  const [status, setStatus] = useState<string>('uploading');
   const [progress, setProgress] = useState(0);
-  const [eta, setEta] = useState<number | null>(null);
+  const [message, setMessage] = useState('Uploading your scan...');
   const { session } = useAuth();
   const navigation = useNavigation();
 
   useEffect(() => {
     if (!session?.user) return;
 
-    // Poll for status updates
     const interval = setInterval(async () => {
       try {
         const { data, error } = await supabase
           .from('profiles')
-          .select('body_scan_status')
+          .select('body_scan_status, body_scan_progress, body_scan_message')
           .eq('id', session.user.id)
           .single();
 
         if (error) {
           console.error('Error fetching profile status:', error);
-          // Handle network error
-          setStatus('failed');
           return;
         }
 
-        switch (data.body_scan_status) {
-          case 'uploaded':
-            setStatus('processing');
-            setProgress(30);
-            setEta(120); // 2 minutes estimate
-            break;
-          case 'processing':
-            setStatus('processing');
-            setProgress(prev => Math.min((prev || 0) + 5, 90)); // Handle possibly null prev
-            if (eta !== null) setEta(prev => Math.max((prev || 0) - 5, 0));
-            break;
-          case 'complete':
-            setStatus('complete');
-            setProgress(100);
-            break;
-          case 'failed':
-            setStatus('failed');
-            break;
-          default:
-            // Keep current status
-            break;
+        setStatus(data.body_scan_status);
+        if (data.body_scan_progress != null) setProgress(data.body_scan_progress);
+        if (data.body_scan_message) setMessage(data.body_scan_message);
+
+        if (data.body_scan_status === 'complete') {
+          clearInterval(interval);
         }
       } catch (error) {
         console.error('Error polling profile status:', error);
-        // Handle network error
-        setStatus('failed');
       }
-    }, 5000); // Poll every 5 seconds
+    }, 3000);
 
     return () => clearInterval(interval);
-  }, [session, eta]);
+  }, [session]);
 
   const retryScan = () => {
     navigation.navigate('BodyScan' as never);
@@ -70,68 +50,43 @@ export default function ScanProgressScreen() {
     navigation.navigate('MainTabs' as never);
   };
 
-  const renderUploadingState = () => (
-    <View style={styles.stateContainer}>
-      <ActivityIndicator size="large" color="#007AFF" style={styles.icon} />
-      <Text style={styles.stateTitle}>Uploading Your Scan</Text>
-      <Text style={styles.stateDescription}>
-        We're uploading your body scan to our servers for processing.
-      </Text>
-    </View>
-  );
-
-  const renderProcessingState = () => (
-    <View style={styles.stateContainer}>
-      <ActivityIndicator size="large" color="#007AFF" style={styles.icon} />
-      <Text style={styles.stateTitle}>Processing Your Scan</Text>
-      <Text style={styles.stateDescription}>
-        We're analyzing your body measurements and creating your personalized avatar.
-      </Text>
-      {eta !== null && (
-        <Text style={styles.etaText}>
-          Estimated time remaining: {Math.floor(eta / 60)}:{String(eta % 60).padStart(2, '0')}
-        </Text>
-      )}
-      <View style={styles.progressBar}>
-        <View style={[styles.progressFill, { width: `${progress}%` }]} />
-      </View>
-      <Text style={styles.progressText}>{progress}% complete</Text>
-    </View>
-  );
-
-  const renderCompleteState = () => (
-    <View style={styles.stateContainer}>
-      <Text style={[styles.icon, styles.checkmark]}>✓</Text>
-      <Text style={styles.stateTitle}>Scan Complete!</Text>
-      <Text style={styles.stateDescription}>
-        Your body measurements have been successfully processed. You can now create personalized outfits.
-      </Text>
-      <TouchableOpacity style={styles.button} onPress={continueToWardrobe}>
-        <Text style={styles.buttonText}>Continue to Wardrobe</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderFailedState = () => (
-    <View style={styles.stateContainer}>
-      <Text style={[styles.icon, styles.errorIcon]}>⚠</Text>
-      <Text style={styles.stateTitle}>Scan Processing Failed</Text>
-      <Text style={styles.stateDescription}>
-        We encountered an issue while processing your scan. Please try again.
-      </Text>
-      <TouchableOpacity style={styles.button} onPress={retryScan}>
-        <Text style={styles.buttonText}>Retry Scan</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Scan Progress</Text>
-      {status === 'uploading' && renderUploadingState()}
-      {status === 'processing' && renderProcessingState()}
-      {status === 'complete' && renderCompleteState()}
-      {status === 'failed' && renderFailedState()}
+
+      {status === 'failed' ? (
+        <View style={styles.stateContainer}>
+          <Text style={[styles.icon, styles.errorIcon]}>⚠</Text>
+          <Text style={styles.stateTitle}>Scan Processing Failed</Text>
+          <Text style={styles.stateDescription}>{message || 'An error occurred during processing.'}</Text>
+          <TouchableOpacity style={styles.button} onPress={retryScan}>
+            <Text style={styles.buttonText}>Retry Scan</Text>
+          </TouchableOpacity>
+        </View>
+      ) : status === 'complete' ? (
+        <View style={styles.stateContainer}>
+          <Text style={[styles.icon, styles.checkmark]}>✓</Text>
+          <Text style={styles.stateTitle}>Scan Complete!</Text>
+          <Text style={styles.stateDescription}>
+            Your body measurements have been successfully processed. You can now create personalized outfits.
+          </Text>
+          <TouchableOpacity style={styles.button} onPress={continueToWardrobe}>
+            <Text style={styles.buttonText}>Continue to Wardrobe</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.stateContainer}>
+          <ActivityIndicator size="large" color="#007AFF" style={styles.icon} />
+          <Text style={styles.stateTitle}>
+            {status === 'uploading' ? 'Uploading Your Scan' : 'Processing Your Scan'}
+          </Text>
+          <Text style={styles.stateDescription}>{message}</Text>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: `${Math.min(progress, 100)}%` }]} />
+          </View>
+          <Text style={styles.progressText}>{progress}%</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -175,11 +130,6 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 20,
     lineHeight: 22,
-  },
-  etaText: {
-    fontSize: 14,
-    color: '#007AFF',
-    marginBottom: 15,
   },
   progressBar: {
     width: '100%',
