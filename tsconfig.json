@@ -3,5 +3,6 @@
   "compilerOptions": {
     "strict": true,
     "types": ["jest", "node"]
-  }
+  },
+  "exclude": ["jest.setup.js", "jest.env.js", "node_modules", ".expo"]
 }

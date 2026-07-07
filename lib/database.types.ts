@@ -13,11 +13,11 @@ export type Garment = {
   user_id: string;
   image_url: string;
   segmented_url: string | null;
-  brand: string;
-  nickname: string;
+  brand: string | null;
+  nickname: string | null;
   type: 'top' | 'bottom' | 'dress' | 'outerwear' | 'shoes' | 'accessory';
-  color: string;
-  fabric: string;
+  color: string | null;
+  fabric: string | null;
   created_at: string;
 };
 

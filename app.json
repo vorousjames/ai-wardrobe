@@ -7,9 +7,12 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.vorotech.aiwardrobe",
+      "supportsTablet": true,
+      "appleTeamId": "6DN7R2HPMQ"
     },
     "android": {
+      "package": "com.iclawdius.aiwardrobe",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -20,6 +23,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "owner": "iclawdius-org",
+    "extra": {
+      "eas": {
+        "projectId": "145d9a9d-1950-41f0-83d7-a2d359826257"
+      }
     }
   }
 }
