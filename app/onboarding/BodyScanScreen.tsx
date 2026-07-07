@@ -97,8 +97,6 @@ export default function BodyScanScreen() {
     setIsUploading(true);
     setPhase('uploading');
     setError(null);
-    setUploadProgress(0);
-    setUploadStalled(false);
 
     try {
       const fileName = `body-scan/${session.user.id}/${Date.now()}.mp4`;
