@@ -14,10 +14,12 @@ export default function BodyScanScreen() {
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStalled, setUploadStalled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<'front' | 'back'>('front');
   const cameraRef = useRef<CameraView>(null);
+  const uploadTaskRef = useRef<UploadTask | null>(null);
   const { session } = useAuth();
   const navigation = useNavigation();
 
@@ -88,6 +90,15 @@ export default function BodyScanScreen() {
     setIsUploading(true);
     setPhase('uploading');
     setError(null);
+    setUploadProgress(0);
+    setUploadStalled(false);
+
+    // Timeout: auto-cancel after 3 minutes
+    let timedOut = false;
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      setUploadStalled(true);
+    }, 180000);
 
     try {
       const fileName = `body-scan/${session.user.id}/${Date.now()}.mp4`;
@@ -116,10 +127,15 @@ export default function BodyScanScreen() {
             ? Math.round((progress.bytesSent / progress.totalBytes) * 100)
             : 0;
           setUploadProgress(pct);
+          setUploadStalled(false);
         },
       });
+      uploadTaskRef.current = task;
 
       const uploadResult = await task.uploadAsync();
+
+      if (timedOut) return;
+      clearTimeout(timeoutTimer);
 
       if (uploadResult.status !== 200 && uploadResult.status !== 201) {
         throw new Error(`Upload failed with status ${uploadResult.status}: ${uploadResult.body}`);
@@ -142,6 +158,7 @@ export default function BodyScanScreen() {
 
       navigation.navigate('ScanProgress' as never);
     } catch (err) {
+      clearTimeout(timeoutTimer);
       const msg = err instanceof Error ? err.message : 'Upload failed';
       setError(msg);
       setPhase('camera');
@@ -149,6 +166,16 @@ export default function BodyScanScreen() {
       Alert.alert('Upload Error', msg);
     }
   }, [session, videoUri, navigation]);
+
+  const cancelUpload = useCallback(() => {
+    uploadTaskRef.current = null;
+    setPhase('camera');
+    setVideoUri(null);
+    setIsUploading(false);
+    setUploadProgress(0);
+    setUploadStalled(false);
+    setError(null);
+  }, []);
 
   if (phase === 'camera' && permission?.granted) {
     return (
@@ -218,6 +245,12 @@ export default function BodyScanScreen() {
             <Text style={styles.progressText}>{uploadProgress}%</Text>
           </>
         )}
+        {uploadStalled && (
+          <Text style={styles.stalledText}>Upload seems slow. You can wait or cancel.</Text>
+        )}
+        <TouchableOpacity style={styles.cancelButton} onPress={cancelUpload}>
+          <Text style={styles.cancelButtonText}>Cancel</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -464,5 +497,25 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 8,
     textAlign: 'center',
+  },
+  stalledText: {
+    fontSize: 14,
+    color: '#ff9500',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  cancelButton: {
+    marginTop: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    alignSelf: 'center',
+  },
+  cancelButtonText: {
+    color: '#666',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
