@@ -14,6 +14,11 @@ jest.mock('../../lib/authContext', () => ({
   useAuth: () => ({ session: { user: { id: 'test-user-id' } } }),
 }));
 
+jest.mock('expo-camera', () => ({
+  CameraView: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useCameraPermissions: () => [null, jest.fn()],
+}));
+
 describe('BodyScanScreen', () => {
   beforeEach(() => { jest.clearAllMocks(); });
 
@@ -26,7 +31,7 @@ describe('BodyScanScreen', () => {
 
   it('shows instructions for proper clothing', async () => {
     const { getByText } = await render(<BodyScanScreen />);
-    expect(getByText('• Wear form-fitting clothing (leggings, tank top, or swimsuit)')).toBeTruthy();
-    expect(getByText('• Slowly turn 360° in front of the camera')).toBeTruthy();
+    expect(getByText('• Wear form-fitting clothing')).toBeTruthy();
+    expect(getByText('• Take a photo every ~90° as you turn')).toBeTruthy();
   });
 });
