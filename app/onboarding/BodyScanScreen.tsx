@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as FileSystem from 'expo-file-system';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/authContext';
 import { useNavigation } from '@react-navigation/native';
@@ -90,15 +91,31 @@ export default function BodyScanScreen() {
     try {
       const fileName = `body-scan/${session.user.id}/${Date.now()}.mp4`;
 
-      const response = await fetch(videoUri);
-      const blob = await response.blob();
+      const fileInfo = await FileSystem.getInfoAsync(videoUri);
+      if (!fileInfo.exists) throw new Error('Video file not found');
 
-      const { error: uploadError } = await supabase.storage
-        .from('body-scans')
-        .upload(fileName, blob, {
-          contentType: 'video/mp4',
-          upsert: false,
-        });
+      // Upload via Supabase Storage REST API using expo-file-system
+      const supabaseUrl = 'https://tmcfiscdluwwpkcaeyky.supabase.co';
+      const uploadUrl = `${supabaseUrl}/storage/v1/object/body-scans/${fileName}`;
+      
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      const accessToken = currentSession?.access_token;
+      if (!accessToken) throw new Error('Not authenticated');
+
+      const uploadResult = await FileSystem.uploadAsync(uploadUrl, videoUri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'file',
+        mimeType: 'video/mp4',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'x-upsert': 'false',
+        },
+      });
+
+      if (uploadResult.status !== 200) {
+        throw new Error(`Upload failed with status ${uploadResult.status}`);
+      }
 
       if (uploadError) throw uploadError;
 
