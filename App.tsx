@@ -13,6 +13,7 @@ import GarmentDetailScreen from './app/wardrobe/GarmentDetailScreen';
 import BodyScanScreen from './app/onboarding/BodyScanScreen';
 import ScanProgressScreen from './app/onboarding/ScanProgressScreen';
 import RenderResultScreen from './app/outfit/RenderResultScreen';
+import OTACheckScreen from './app/ota/OTACheckScreen';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { supabase } from './lib/supabase';
 import { LoRAService } from './lib/rendering/LoRAService';
@@ -173,6 +174,12 @@ function RootNavigator() {
 }
 
 export default function App() {
+  const [otaDone, setOtaDone] = useState(false);
+
+  if (!otaDone) {
+    return <OTACheckScreen onDone={() => setOtaDone(true)} />;
+  }
+
   return (
     <AuthProvider>
       <RootNavigator />
