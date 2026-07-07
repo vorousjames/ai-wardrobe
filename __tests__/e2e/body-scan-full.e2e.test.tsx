@@ -38,12 +38,19 @@ jest.mock('expo-camera', () => ({
   useCameraPermissions: jest.fn(() => [{ granted: true }, jest.fn()]),
 }));
 
-jest.mock('expo-file-system/legacy', () => {
-  const mockGetInfo = jest.fn();
-  const mockUpload = jest.fn();
+jest.mock('expo-file-system', () => {
+  const mockFile = jest.fn().mockImplementation(() => ({
+    exists: true,
+    size: 1000,
+  }));
+  const mockUploadAsync = jest.fn().mockResolvedValue({ status: 200, body: '{}' });
+  const mockUploadTask = jest.fn().mockImplementation(() => ({
+    uploadAsync: mockUploadAsync,
+  }));
   return {
-    getInfoAsync: mockGetInfo,
-    uploadAsync: mockUpload,
+    File: mockFile,
+    UploadTask: mockUploadTask,
+    UploadType: { BINARY_CONTENT: 0 },
   };
 });
 
@@ -57,9 +64,6 @@ describe('Body Scan E2E', () => {
     supabase.storage.from().getPublicUrl.mockReturnValue({
       data: { publicUrl: 'https://example.com/scan.mp4' },
     });
-    const fs = require('expo-file-system');
-    fs.getInfoAsync.mockResolvedValue({ exists: true, size: 1000 });
-    fs.uploadAsync.mockResolvedValue({ status: 200, body: '{}' });
   });
 
   describe('BodyScanScreen', () => {

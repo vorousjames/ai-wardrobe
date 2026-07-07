@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as FileSystem from 'expo-file-system/legacy';
+import { File, UploadTask, UploadType } from 'expo-file-system';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/authContext';
 import { useNavigation } from '@react-navigation/native';
@@ -91,20 +91,19 @@ export default function BodyScanScreen() {
     try {
       const fileName = `body-scan/${session.user.id}/${Date.now()}.mp4`;
 
-      const fileInfo = await FileSystem.getInfoAsync(videoUri);
-      if (!fileInfo.exists) throw new Error('Video file not found');
+      const videoFile = new File(videoUri);
+      if (!videoFile.exists) throw new Error('Video file not found');
 
-      // Upload via Supabase Storage REST API using expo-file-system
       const supabaseUrl = 'https://tmcfiscdluwwpkcaeyky.supabase.co';
       const uploadUrl = `${supabaseUrl}/storage/v1/object/body-scans/${fileName}`;
-      
+
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       const accessToken = currentSession?.access_token;
       if (!accessToken) throw new Error('Not authenticated');
 
-      const uploadResult = await FileSystem.uploadAsync(uploadUrl, videoUri, {
+      const task = new UploadTask(videoFile, uploadUrl, {
         httpMethod: 'PUT',
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        uploadType: UploadType.BINARY_CONTENT,
         mimeType: 'video/mp4',
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -112,6 +111,8 @@ export default function BodyScanScreen() {
           'x-upsert': 'true',
         },
       });
+
+      const uploadResult = await task.uploadAsync();
 
       if (uploadResult.status !== 200 && uploadResult.status !== 201) {
         throw new Error(`Upload failed with status ${uploadResult.status}: ${uploadResult.body}`);
