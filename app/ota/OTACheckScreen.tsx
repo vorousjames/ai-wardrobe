@@ -2,54 +2,51 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import * as Updates from 'expo-updates';
 
-type OTAStatus = 'checking' | 'downloading' | 'ready' | 'up_to_date' | 'error';
-
 export default function OTACheckScreen({ onDone }: { onDone: () => void }) {
-  const [status, setStatus] = useState<OTAStatus>('checking');
-  const [message, setMessage] = useState('Checking for updates...');
+  const [message, setMessage] = useState('Loading...');
   const doneRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
 
     const run = async () => {
-      try {
-        // Check for update
-        const checkResult = await Updates.checkForUpdateAsync();
+      // Hard timeout: bail after 5 seconds no matter what
+      const timeout = setTimeout(() => {
+        if (!cancelled) {
+          cancelled = true;
+          onDone();
+        }
+      }, 5000);
 
+      try {
+        setMessage('Checking for updates...');
+        const checkResult = await Updates.checkForUpdateAsync();
         if (cancelled) return;
 
         if (!checkResult.isAvailable) {
-          setStatus('up_to_date');
-          setMessage('App is up to date');
-          // Short delay so user sees the message
-          await new Promise(r => setTimeout(r, 500));
+          clearTimeout(timeout);
           if (!cancelled) onDone();
           return;
         }
 
-        // Download the update
-        setStatus('downloading');
         setMessage('Applying update...');
         const fetchResult = await Updates.fetchUpdateAsync();
-
         if (cancelled) return;
 
+        clearTimeout(timeout);
+
         if (fetchResult.isNew) {
-          setStatus('ready');
-          setMessage('Update ready! Restarting...');
-          await new Promise(r => setTimeout(r, 1000));
+          setMessage('Update ready!');
+          await new Promise(r => setTimeout(r, 500));
           if (!cancelled) {
             await Updates.reloadAsync();
           }
         } else {
-          // No new update after all
           if (!cancelled) onDone();
         }
-      } catch (err) {
-        if (cancelled) return;
-        // Silently fail and continue — don't block the user
-        onDone();
+      } catch {
+        clearTimeout(timeout);
+        if (!cancelled) onDone();
       }
     };
 
