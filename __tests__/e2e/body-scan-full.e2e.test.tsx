@@ -38,7 +38,7 @@ jest.mock('expo-camera', () => ({
   useCameraPermissions: jest.fn(() => [{ granted: true }, jest.fn()]),
 }));
 
-jest.mock('expo-file-system', () => {
+jest.mock('expo-file-system/legacy', () => {
   const mockGetInfo = jest.fn();
   const mockUpload = jest.fn();
   return {
