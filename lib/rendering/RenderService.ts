@@ -1,4 +1,5 @@
 import { RenderRequest, RenderResult, RenderStatus, RenderProgress } from './types';
+import { RenderPipeline } from './RenderPipeline';
 
 export type RenderProgressCallback = (progress: RenderProgress) => void;
 
@@ -101,8 +102,11 @@ export class RenderService {
           message: 'Starting render process'
         });
         
-        // Simulate render process with progress updates
-        const result = await this.mockRenderProcess(request, requestId);
+        // Use RenderPipeline for actual rendering (includes cache check)
+        const renderPipeline = new RenderPipeline();
+        const result = await renderPipeline.renderOutfit(request, (progress) => {
+          this.reportProgress(requestId, progress);
+        });
         
         // Store result
         this.renderResults.set(requestId, result);
@@ -129,39 +133,6 @@ export class RenderService {
   }
 
   /**
-   * Mock render process that simulates Stable Diffusion inference
-   */
-  private async mockRenderProcess(
-    request: RenderRequest, 
-    requestId: string
-  ): Promise<RenderResult> {
-    // Simulate multi-step process with progress updates
-    const steps = 5;
-    for (let i = 0; i < steps; i++) {
-      // Simulate work
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Report progress
-      const progress = Math.round(((i + 1) / steps) * 100);
-      this.reportProgress(requestId, { 
-        status: RenderStatus.PROCESSING, 
-        progress,
-        message: `Processing step ${i + 1} of ${steps}`
-      });
-    }
-    
-    // Generate mock result
-    const cacheKey = `render_${requestId}_${Date.now()}`;
-    const imageUrl = `file:///tmp/${cacheKey}.png`;
-    
-    return {
-      image_url: imageUrl,
-      cache_key: cacheKey,
-      timestamp: Date.now()
-    };
-  }
-
-  /**
    * Report progress to callback if registered
    */
   private reportProgress(requestId: string, progress: RenderProgress): void {
@@ -176,7 +147,14 @@ export class RenderService {
    */
   private generateRequestId(request: RenderRequest): string {
     const content = `${request.user_id}_${request.garment_ids.join('_')}_${request.pose}`;
-    return btoa(content).replace(/[^a-zA-Z0-9]/g, '');
+    // Simple hash function for request ID
+    let hash = 0;
+    for (let i = 0; i < content.length; i++) {
+      const char = content.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return `req_${Math.abs(hash)}`;
   }
 
   /**

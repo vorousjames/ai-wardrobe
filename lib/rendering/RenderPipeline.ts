@@ -3,6 +3,8 @@ import { ModelManager } from './ModelManager';
 import { GarmentConditioningService } from './GarmentConditioningService';
 import { LoRAService } from './LoRAService';
 import { RenderRequest, RenderResult, RenderStatus, AiRendererModule } from './types';
+import { supabase } from '../supabase';
+import { RenderCache } from '../database.types';
 
 // Try to import the native module, fallback to mock if not available
 let AiRenderer: AiRendererModule | null = null;
@@ -18,7 +20,6 @@ export class RenderPipeline {
   private modelManager: ModelManager;
   private garmentConditioningService: GarmentConditioningService;
   private loraService: LoRAService;
-  private renderCache: Map<string, RenderResult> = new Map();
 
   constructor() {
     this.renderService = new RenderService();
@@ -35,10 +36,11 @@ export class RenderPipeline {
     onProgress?: RenderProgressCallback
   ): Promise<RenderResult> {
     // Step 1: Check render cache
-    const cacheKey = this.generateCacheKey(request);
-    if (this.renderCache.has(cacheKey)) {
+    onProgress?.({ status: RenderStatus.PENDING, message: 'Checking cache...' });
+    const cachedResult = await this.checkRenderCache(request);
+    if (cachedResult) {
       onProgress?.({ status: RenderStatus.COMPLETE, message: 'Using cached result' });
-      return this.renderCache.get(cacheKey)!;
+      return cachedResult;
     }
 
     // Step 2: Load user LoRA
@@ -66,11 +68,74 @@ export class RenderPipeline {
     const result = await this.runInference(request, onProgress);
 
     // Step 5: Cache result
-    this.renderCache.set(cacheKey, result);
+    await this.cacheRenderResult(request, result);
 
     // Step 6: Return result
     onProgress?.({ status: RenderStatus.COMPLETE, progress: 100, message: 'Render complete' });
     return result;
+  }
+
+  /**
+   * Check if the render result is already cached
+   */
+  private async checkRenderCache(request: RenderRequest): Promise<RenderResult | null> {
+    try {
+      const cacheKey = this.generateCacheKey(request);
+      
+      // Check database cache first
+      const { data, error } = await supabase
+        .from('render_cache')
+        .select('*')
+        .eq('cache_key', cacheKey)
+        .gt('expires_at', new Date().toISOString())
+        .single();
+      
+      if (error) {
+        // No cached result found or error occurred
+        return null;
+      }
+      
+      const cached = data as RenderCache;
+      
+      // Return cached result
+      return {
+        image_url: cached.image_url,
+        cache_key: cached.cache_key,
+        timestamp: new Date(cached.created_at).getTime()
+      };
+    } catch (error) {
+      console.warn('Cache check failed:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Cache the render result
+   */
+  private async cacheRenderResult(request: RenderRequest, result: RenderResult): Promise<void> {
+    try {
+      // Calculate expiration date (30 days from now)
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 30);
+      
+      // Save to database
+      const { error } = await supabase
+        .from('render_cache')
+        .upsert({
+          cache_key: result.cache_key,
+          image_url: result.image_url,
+          created_at: new Date(result.timestamp).toISOString(),
+          expires_at: expiresAt.toISOString()
+        }, {
+          onConflict: 'cache_key'
+        });
+      
+      if (error) {
+        console.warn('Failed to cache render result:', error);
+      }
+    } catch (error) {
+      console.warn('Cache save failed:', error);
+    }
   }
 
   /**
@@ -108,7 +173,7 @@ export class RenderPipeline {
         const imagePath = await AiRenderer.generate(prompt);
         
         // Generate result
-        const cacheKey = `render_${request.user_id}_${request.garment_ids.join('_')}_${Date.now()}`;
+        const cacheKey = this.generateCacheKey(request);
         
         return {
           image_url: `file://${imagePath}`,
@@ -143,7 +208,7 @@ export class RenderPipeline {
     }
     
     // Generate mock result
-    const cacheKey = `render_${request.user_id}_${request.garment_ids.join('_')}_${Date.now()}`;
+    const cacheKey = this.generateCacheKey(request);
     const imageUrl = `file:///tmp/${cacheKey}.png`;
     
     return {
@@ -155,25 +220,46 @@ export class RenderPipeline {
 
   /**
    * Generate a cache key for a render request
+   * Cache key: hash(user_id + sorted_garment_ids + pose)
    */
   private generateCacheKey(request: RenderRequest): string {
-    const content = `${request.user_id}_${request.garment_ids.join('_')}_${request.pose}`;
-    return btoa(content).replace(/[^a-zA-Z0-9]/g, '');
+    // Sort garment IDs to ensure consistent cache keys regardless of order
+    const sortedGarmentIds = [...request.garment_ids].sort();
+    const content = `${request.user_id}_${sortedGarmentIds.join('_')}_${request.pose}`;
+    // Simple hash function for cache key
+    let hash = 0;
+    for (let i = 0; i < content.length; i++) {
+      const char = content.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return `render_${Math.abs(hash)}`;
   }
 
   /**
    * Get cached render result
    */
-  public getCachedResult(request: RenderRequest): RenderResult | undefined {
-    const cacheKey = this.generateCacheKey(request);
-    return this.renderCache.get(cacheKey);
+  public async getCachedResult(request: RenderRequest): Promise<RenderResult | undefined> {
+    const result = await this.checkRenderCache(request);
+    return result || undefined;
   }
 
   /**
    * Clear render cache
    */
-  public clearCache(): void {
-    this.renderCache.clear();
+  public async clearCache(): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('render_cache')
+        .delete()
+        .lt('expires_at', new Date().toISOString());
+      
+      if (error) {
+        console.warn('Failed to clear expired cache:', error);
+      }
+    } catch (error) {
+      console.warn('Cache clear failed:', error);
+    }
   }
 
   /**
