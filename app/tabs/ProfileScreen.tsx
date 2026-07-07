@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import * as Updates from 'expo-updates';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/authContext';
 
@@ -98,6 +99,19 @@ export default function ProfileScreen() {
           {scanStatus === 'not_started' ? 'Start Body Scan' : 'Re-scan'}
         </Text>
       </TouchableOpacity>
+
+      {/* Version Info */}
+      <View style={styles.versionContainer}>
+        <Text style={styles.versionText}>
+          Runtime: {Updates.runtimeVersion || 'N/A'}
+        </Text>
+        <Text style={styles.versionText}>
+          Update: {Updates.updateId ? Updates.updateId.substring(0, 8) : 'embedded'}
+        </Text>
+        <Text style={styles.versionText}>
+          Channel: {Updates.channel || 'N/A'}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -159,5 +173,17 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  versionContainer: {
+    position: 'absolute',
+    bottom: 30,
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+  },
+  versionText: {
+    fontSize: 11,
+    color: '#bbb',
+    marginBottom: 2,
   },
 });
