@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -14,6 +14,7 @@ import BodyScanScreen from './app/onboarding/BodyScanScreen';
 import ScanProgressScreen from './app/onboarding/ScanProgressScreen';
 import RenderResultScreen from './app/outfit/RenderResultScreen';
 import { AuthProvider, useAuth } from './lib/authContext';
+import { supabase } from './lib/supabase';
 
 const Tab = createBottomTabNavigator();
 
@@ -82,14 +83,67 @@ function MainStack() {
 
 function RootNavigator() {
   const { session, loading } = useAuth();
+  const [initialRoute, setInitialRoute] = useState<string | null>(null);
+  const [routeLoading, setRouteLoading] = useState(true);
 
-  if (loading) {
+  useEffect(() => {
+    if (loading) return;
+
+    const determineInitialRoute = async () => {
+      if (session) {
+        try {
+          // Check user's body scan status
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('body_scan_status')
+            .eq('id', session.user.id)
+            .single();
+
+          if (error) {
+            console.error('Error fetching profile:', error);
+            setInitialRoute('MainTabs');
+          } else if (data.body_scan_status === 'not_started') {
+            setInitialRoute('BodyScan');
+          } else if (data.body_scan_status === 'uploaded' || data.body_scan_status === 'processing') {
+            setInitialRoute('ScanProgress');
+          } else {
+            setInitialRoute('MainTabs');
+          }
+        } catch (error) {
+          console.error('Error determining initial route:', error);
+          setInitialRoute('MainTabs');
+        }
+      } else {
+        setInitialRoute(null);
+      }
+      setRouteLoading(false);
+    };
+
+    determineInitialRoute();
+  }, [session, loading]);
+
+  if (loading || routeLoading) {
     return null;
   }
 
   return (
     <NavigationContainer>
-      {session ? <MainStack /> : <AuthStack />}
+      {session ? (
+        <Stack.Navigator initialRouteName={initialRoute || 'MainTabs'}>
+          <Stack.Screen 
+            name="MainTabs" 
+            component={TabNavigator} 
+            options={{ headerShown: false }} 
+          />
+          <Stack.Screen name="GarmentUpload" component={GarmentUploadScreen} />
+          <Stack.Screen name="GarmentDetail" component={GarmentDetailScreen} />
+          <Stack.Screen name="BodyScan" component={BodyScanScreen} />
+          <Stack.Screen name="ScanProgress" component={ScanProgressScreen} />
+          <Stack.Screen name="RenderResult" component={RenderResultScreen} />
+        </Stack.Navigator>
+      ) : (
+        <AuthStack />
+      )}
     </NavigationContainer>
   );
 }

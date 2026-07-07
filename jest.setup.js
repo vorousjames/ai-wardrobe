@@ -29,3 +29,15 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 
 jest.mock('react-native-screens', () => ({}));
+
+jest.mock('expo-av', () => ({
+  Video: 'Video',
+  Audio: { Sound: {} },
+  ResizeMode: { CONTAIN: 'contain', COVER: 'cover', STRETCH: 'stretch' },
+}));
+
+jest.mock('expo-camera', () => ({
+  CameraView: 'CameraView',
+  useCameraPermissions: jest.fn().mockReturnValue([{ granted: true }, jest.fn()]),
+  CameraType: { front: 'front', back: 'back' },
+}));
