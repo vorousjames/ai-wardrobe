@@ -2,6 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { Text } from 'react-native';
 import LoginScreen from './app/auth/LoginScreen';
 import SignUpScreen from './app/auth/SignUpScreen';
 import WardrobeScreen from './app/tabs/WardrobeScreen';
@@ -14,8 +15,11 @@ import ScanProgressScreen from './app/onboarding/ScanProgressScreen';
 import RenderResultScreen from './app/outfit/RenderResultScreen';
 import { AuthProvider, useAuth } from './lib/authContext';
 
-// Tab Navigator
 const Tab = createBottomTabNavigator();
+
+function TabIcon({ emoji }: { emoji: string }) {
+  return <Text style={{ fontSize: 20 }}>{emoji}</Text>;
+}
 
 function TabNavigator() {
   return (
@@ -25,7 +29,7 @@ function TabNavigator() {
         component={WardrobeScreen} 
         options={{ 
           tabBarLabel: 'Wardrobe',
-          tabBarIcon: () => '👕'
+          tabBarIcon: () => <TabIcon emoji="👕" />
         }} 
       />
       <Tab.Screen 
@@ -33,7 +37,7 @@ function TabNavigator() {
         component={OutfitBuilderScreen} 
         options={{ 
           tabBarLabel: 'Outfits',
-          tabBarIcon: () => '✨'
+          tabBarIcon: () => <TabIcon emoji="✨" />
         }} 
       />
       <Tab.Screen 
@@ -41,14 +45,13 @@ function TabNavigator() {
         component={ProfileScreen} 
         options={{ 
           tabBarLabel: 'Profile',
-          tabBarIcon: () => '👤'
+          tabBarIcon: () => <TabIcon emoji="👤" />
         }} 
       />
     </Tab.Navigator>
   );
 }
 
-// Stack Navigator
 const Stack = createNativeStackNavigator();
 
 function AuthStack() {
@@ -81,7 +84,7 @@ function RootNavigator() {
   const { session, loading } = useAuth();
 
   if (loading) {
-    return null; // Show a loading spinner here if needed
+    return null;
   }
 
   return (
