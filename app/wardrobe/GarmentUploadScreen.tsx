@@ -102,7 +102,7 @@ export default function GarmentUploadScreen({ navigation }: { navigation: any })
         .getPublicUrl(fileName);
 
       // Insert garment record into database
-      const { error: insertError } = await supabase.from('garments').insert([
+      const { data: garmentData, error: insertError } = await supabase.from('garments').insert([
         {
           user_id: session.user.id,
           image_url: urlData.publicUrl,
@@ -111,13 +111,39 @@ export default function GarmentUploadScreen({ navigation }: { navigation: any })
           type: type,
           color: color || null,
           fabric: fabric || null,
+          segmentation_status: 'not_started',
         },
-      ]);
+      ]).select();
 
       if (insertError) {
         // If database insert fails, try to delete the uploaded image
         await supabase.storage.from('garments').remove([fileName]);
         throw insertError;
+      }
+
+      // Trigger segmentation pipeline
+      if (garmentData && garmentData.length > 0) {
+        const garmentId = garmentData[0].id;
+        try {
+          // In a production environment, this would call your segmentation service
+          // For now, we'll just log that it should be triggered
+          console.log(`Segmentation pipeline triggered for garment ID: ${garmentId}`);
+          
+          // Example of how you might trigger the segmentation service:
+          // await fetch('YOUR_SEGMENTATION_SERVICE_URL/trigger', {
+          //   method: 'POST',
+          //   headers: {
+          //     'Content-Type': 'application/json',
+          //   },
+          //   body: JSON.stringify({
+          //     garment_id: garmentId,
+          //     image_url: urlData.publicUrl,
+          //   }),
+          // });
+        } catch (segmentationError) {
+          console.error('Failed to trigger segmentation pipeline:', segmentationError);
+          // Note: We don't throw here because the garment upload was successful
+        }
       }
 
       // Success

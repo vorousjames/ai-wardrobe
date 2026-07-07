@@ -1,0 +1,6 @@
+torch>=2.0.0
+segment-anything
+opencv-python-headless
+pillow
+boto3
+supabase
