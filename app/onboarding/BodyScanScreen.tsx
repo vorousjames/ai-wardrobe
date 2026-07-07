@@ -1,5 +1,5 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Image } from 'react-native';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/authContext';
@@ -9,10 +9,12 @@ type ScanPhase = 'instructions' | 'camera' | 'uploading';
 
 export default function BodyScanScreen() {
   const [phase, setPhase] = useState<ScanPhase>('instructions');
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [videoUri, setVideoUri] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  const [facing, setFacing] = useState<'front' | 'back'>('front');
   const cameraRef = useRef<CameraView>(null);
   const { session } = useAuth();
   const navigation = useNavigation();
@@ -24,14 +26,14 @@ export default function BodyScanScreen() {
         if (!result.granted) {
           Alert.alert(
             'Camera Required',
-            'Body scan needs camera access to capture your 360° photos. Please enable camera permissions in Settings.',
+            'Body scan needs camera access. Please enable camera permissions in Settings.',
             [{ text: 'OK' }]
           );
           return;
         }
       }
       setPhase('camera');
-      setPhotos([]);
+      setVideoUri(null);
       setError(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to start camera';
@@ -40,63 +42,75 @@ export default function BodyScanScreen() {
     }
   };
 
-  const takePhoto = useCallback(async () => {
-    if (!cameraRef.current) return;
-    try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7 });
-      if (photo?.uri) {
-        setPhotos(prev => [...prev, photo.uri]);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to take photo';
-      Alert.alert('Error', msg);
-    }
+  const toggleFacing = useCallback(() => {
+    setFacing(prev => (prev === 'front' ? 'back' : 'front'));
   }, []);
 
-  const removePhoto = useCallback((index: number) => {
-    setPhotos(prev => prev.filter((_, i) => i !== index));
+  const startRecording = useCallback(async () => {
+    if (!cameraRef.current || isRecording) return;
+    try {
+      setIsRecording(true);
+      const video = await cameraRef.current.recordAsync({
+        maxDuration: 30,
+        quality: '720p',
+      });
+      if (video?.uri) {
+        setVideoUri(video.uri);
+        setIsRecording(false);
+      }
+    } catch (err) {
+      setIsRecording(false);
+      const msg = err instanceof Error ? err.message : 'Failed to record video';
+      Alert.alert('Recording Error', msg);
+    }
+  }, [isRecording]);
+
+  const stopRecording = useCallback(async () => {
+    if (!cameraRef.current || !isRecording) return;
+    try {
+      await cameraRef.current.stopRecording();
+    } catch (err) {
+      // stopRecording may throw if already stopped
+    }
+    setIsRecording(false);
+  }, [isRecording]);
+
+  const retakeVideo = useCallback(() => {
+    setVideoUri(null);
+    setError(null);
   }, []);
 
   const uploadScan = useCallback(async () => {
-    if (!session?.user?.id || photos.length === 0) return;
-    
+    if (!session?.user?.id || !videoUri) return;
+
     setIsUploading(true);
     setPhase('uploading');
     setError(null);
 
     try {
-      // Upload each photo to Supabase storage
-      const uploadedUrls: string[] = [];
-      
-      for (let i = 0; i < photos.length; i++) {
-        const photoUri = photos[i];
-        const fileName = `body-scan/${session.user.id}/${Date.now()}_${i}.jpg`;
-        
-        const response = await fetch(photoUri);
-        const blob = await response.blob();
-        
-        const { error: uploadError } = await supabase.storage
-          .from('body-scans')
-          .upload(fileName, blob, {
-            contentType: 'image/jpeg',
-            upsert: false,
-          });
+      const fileName = `body-scan/${session.user.id}/${Date.now()}.mp4`;
 
-        if (uploadError) throw uploadError;
+      const response = await fetch(videoUri);
+      const blob = await response.blob();
 
-        const { data: { publicUrl } } = supabase.storage
-          .from('body-scans')
-          .getPublicUrl(fileName);
-        
-        uploadedUrls.push(publicUrl);
-      }
+      const { error: uploadError } = await supabase.storage
+        .from('body-scans')
+        .upload(fileName, blob, {
+          contentType: 'video/mp4',
+          upsert: false,
+        });
 
-      // Update body_scan_status in profiles
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('body-scans')
+        .getPublicUrl(fileName);
+
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
           body_scan_status: 'uploaded',
-          body_scan_photos: uploadedUrls,
+          body_scan_photos: [publicUrl],
           body_scan_updated_at: new Date().toISOString(),
         })
         .eq('id', session.user.id);
@@ -111,47 +125,56 @@ export default function BodyScanScreen() {
       setIsUploading(false);
       Alert.alert('Upload Error', msg);
     }
-  }, [session, photos, navigation]);
+  }, [session, videoUri, navigation]);
 
   if (phase === 'camera' && permission?.granted) {
     return (
       <View style={styles.cameraContainer}>
-        <CameraView 
+        <CameraView
           ref={cameraRef}
           style={styles.camera}
-          facing="user"
+          facing={facing}
+          mode="video"
+          videoQuality="720p"
         >
           <View style={styles.cameraOverlay}>
-            <Text style={styles.cameraHint}>
-              Take photos from different angles as you turn
-            </Text>
-            
-            <View style={styles.photoStrip}>
-              {photos.map((uri, i) => (
-                <TouchableOpacity key={i} onPress={() => removePhoto(i)}>
-                  <Image source={{ uri }} style={styles.thumbnail} />
-                </TouchableOpacity>
-              ))}
-            </View>
+            <TouchableOpacity style={styles.flipButton} onPress={toggleFacing}>
+              <Text style={styles.flipButtonText}>⟳ Flip</Text>
+            </TouchableOpacity>
 
-            <View style={styles.cameraControls}>
-              <TouchableOpacity 
-                style={styles.captureButton} 
-                onPress={takePhoto}
-              >
-                <View style={styles.captureInner} />
-              </TouchableOpacity>
-            </View>
-
-            {photos.length >= 4 && (
-              <TouchableOpacity 
-                style={styles.doneButton} 
-                onPress={uploadScan}
-              >
-                <Text style={styles.doneButtonText}>
-                  Done ({photos.length} photos)
+            {videoUri ? (
+              <View style={styles.previewOverlay}>
+                <Text style={styles.previewText}>Video captured!</Text>
+                <View style={styles.previewButtons}>
+                  <TouchableOpacity style={styles.retakeButton} onPress={retakeVideo}>
+                    <Text style={styles.retakeButtonText}>Retake</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.uploadButton} onPress={uploadScan}>
+                    <Text style={styles.uploadButtonText}>Use Video</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.cameraHint}>
+                  {isRecording
+                    ? 'Recording... slowly turn 360°'
+                    : 'Press record, then slowly turn 360°'}
                 </Text>
-              </TouchableOpacity>
+
+                <View style={styles.cameraControls}>
+                  <TouchableOpacity
+                    style={[styles.recordButton, isRecording && styles.recordingActive]}
+                    onPress={isRecording ? stopRecording : startRecording}
+                  >
+                    <View style={[styles.recordInner, isRecording && styles.recordInnerActive]} />
+                  </TouchableOpacity>
+                </View>
+
+                {isRecording && (
+                  <Text style={styles.recordingIndicator}>● REC</Text>
+                )}
+              </>
             )}
           </View>
         </CameraView>
@@ -171,31 +194,31 @@ export default function BodyScanScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Body Scan Setup</Text>
-      
+
       <View style={styles.instructionsContainer}>
         <Text style={styles.instructionsTitle}>Instructions</Text>
         <Text style={styles.instructions}>
-          Take 4-8 photos from different angles:
+          Record a 360° video of yourself:
         </Text>
         <Text style={styles.bullet}>• Wear form-fitting clothing</Text>
         <Text style={styles.bullet}>• Stand in good lighting</Text>
-        <Text style={styles.bullet}>• Take a photo every ~90° as you turn</Text>
+        <Text style={styles.bullet}>• Slowly turn 360° in front of the camera</Text>
         <Text style={styles.bullet}>• Keep arms slightly away from your body</Text>
-        <Text style={styles.bullet}>• Tap a thumbnail to remove and retake</Text>
+        <Text style={styles.bullet}>• Use the flip button to switch cameras</Text>
       </View>
 
       {error && (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity 
-            style={styles.retryButton} 
+          <TouchableOpacity
+            style={styles.retryButton}
             onPress={() => setError(null)}
           >
             <Text style={styles.retryButtonText}>Dismiss</Text>
           </TouchableOpacity>
         </View>
       )}
-      
+
       <TouchableOpacity style={styles.button} onPress={handleStartScan}>
         <Text style={styles.buttonText}>Start Body Scan</Text>
       </TouchableOpacity>
@@ -293,6 +316,20 @@ const styles = StyleSheet.create({
     paddingBottom: 50,
     alignItems: 'center',
   },
+  flipButton: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  flipButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   cameraHint: {
     color: 'white',
     fontSize: 16,
@@ -303,46 +340,76 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 8,
   },
-  photoStrip: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    marginBottom: 20,
-    gap: 8,
-  },
-  thumbnail: {
-    width: 50,
-    height: 50,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: 'white',
-  },
   cameraControls: {
     alignItems: 'center',
     marginBottom: 20,
   },
-  captureButton: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
+  recordButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     borderWidth: 4,
     borderColor: 'white',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  captureInner: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'white',
+  recordingActive: {
+    borderColor: '#ff4444',
   },
-  doneButton: {
+  recordInner: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#ff4444',
+  },
+  recordInnerActive: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    backgroundColor: '#ff4444',
+  },
+  recordingIndicator: {
+    color: '#ff4444',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  previewOverlay: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  previewText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  previewButtons: {
+    flexDirection: 'row',
+    gap: 20,
+  },
+  retakeButton: {
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 8,
+  },
+  retakeButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  uploadButton: {
     backgroundColor: '#007AFF',
     paddingVertical: 12,
     paddingHorizontal: 30,
     borderRadius: 8,
   },
-  doneButtonText: {
+  uploadButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',

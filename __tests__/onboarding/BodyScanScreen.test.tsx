@@ -29,9 +29,10 @@ describe('BodyScanScreen', () => {
     expect(getByText('Start Body Scan')).toBeTruthy();
   });
 
-  it('shows instructions for proper clothing', async () => {
+  it('shows video recording instructions', async () => {
     const { getByText } = await render(<BodyScanScreen />);
     expect(getByText('• Wear form-fitting clothing')).toBeTruthy();
-    expect(getByText('• Take a photo every ~90° as you turn')).toBeTruthy();
+    expect(getByText('• Slowly turn 360° in front of the camera')).toBeTruthy();
+    expect(getByText('• Use the flip button to switch cameras')).toBeTruthy();
   });
 });
