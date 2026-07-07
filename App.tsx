@@ -117,7 +117,7 @@ function RootNavigator() {
             console.warn('Failed to warm up render pipeline:', error);
           }
 
-          // Check user's body scan status
+          // Check user's body scan status — only auto-navigate if never started
           const { data, error } = await supabase
             .from('profiles')
             .select('body_scan_status')
@@ -128,7 +128,8 @@ function RootNavigator() {
             console.error('Error fetching profile:', error);
             setInitialRoute('MainTabs');
           } else if (data.body_scan_status === 'not_started') {
-            setInitialRoute('BodyScan');
+            // Only redirect to BodyScan on very first launch
+            setInitialRoute('MainTabs');
           } else if (data.body_scan_status === 'uploaded' || data.body_scan_status === 'processing') {
             setInitialRoute('ScanProgress');
           } else {

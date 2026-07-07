@@ -30,7 +30,7 @@ export default function OTACheckScreen({ onDone }: { onDone: () => void }) {
 
         // Download the update
         setStatus('downloading');
-        setMessage('Downloading update...');
+        setMessage('Applying update...');
         const fetchResult = await Updates.fetchUpdateAsync();
 
         if (cancelled) return;
