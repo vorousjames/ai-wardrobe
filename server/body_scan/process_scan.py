@@ -28,8 +28,8 @@ import numpy as np
 from supabase import create_client, Client
 
 from mediapipe.tasks import python as mp_tasks
+import mediapipe as mp
 from mediapipe.tasks.python import vision
-from mediapipe.framework.formats import landmark_pb2
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
@@ -148,7 +148,7 @@ def detect_pose_in_frames(frames: list[Path], supabase: Client, user_id: str) ->
             continue
 
         h, w = img.shape[:2]
-        mp_image = mp_tasks.Image(image_format=mp_tasks.ImageFormat.SRGB, data=img)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img)
         result = landmarker.detect(mp_image)
 
         if result.pose_landmarks:
