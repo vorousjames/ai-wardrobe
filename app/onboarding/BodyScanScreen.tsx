@@ -101,6 +101,32 @@ export default function BodyScanScreen() {
     try {
       const fileName = `body-scan/${session.user.id}/${Date.now()}.mp4`;
 
+      // Remove any previous scan data before starting a new one
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('body_scan_photos')
+        .eq('id', session.user.id)
+        .single();
+
+      if (existing?.body_scan_photos?.length) {
+        // Delete old scan video from storage
+        const oldPath = existing.body_scan_photos[0].split('/').slice(-2).join('/');
+        await supabase.storage.from('body-scans').remove([oldPath]);
+      }
+
+      // Reset profile scan data
+      await supabase
+        .from('profiles')
+        .update({
+          body_scan_status: 'uploading',
+          body_scan_progress: 0,
+          body_scan_message: '',
+          body_measurements: null,
+          body_scan_photos: [],
+          lora_url: null,
+        })
+        .eq('id', session.user.id);
+
       // Read file as base64, then upload via Supabase client
       const base64 = await FileSystem.readAsStringAsync(videoUri, {
         encoding: FileSystem.EncodingType.Base64,

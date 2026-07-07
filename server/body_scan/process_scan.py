@@ -98,7 +98,7 @@ def extract_frames(video_path: Path, output_dir: Path, interval: int = 10) -> li
          "-of", "csv=p=0", str(video_path)],
         capture_output=True, text=True, check=True
     )
-    total_frames = int(probe.stdout.strip()) if probe.stdout.strip() else 300
+    total_frames = int(probe.stdout.strip().replace(",", "")) if probe.stdout.strip() else 300
     expected_frames = max(total_frames // interval, 1)
 
     cmd = [
