@@ -10,6 +10,7 @@ jest.mock('@react-navigation/native', () => ({
 jest.mock('../../lib/supabase', () => {
   const mockGetSession = jest.fn();
   const mockGetPublicUrl = jest.fn();
+  const mockUpload = jest.fn().mockResolvedValue({ data: { path: 'test.mp4' }, error: null });
   return {
     supabase: {
       auth: {
@@ -22,6 +23,7 @@ jest.mock('../../lib/supabase', () => {
       })),
       storage: {
         from: () => ({
+          upload: mockUpload,
           getPublicUrl: mockGetPublicUrl,
         }),
       },
@@ -38,21 +40,10 @@ jest.mock('expo-camera', () => ({
   useCameraPermissions: jest.fn(() => [{ granted: true }, jest.fn()]),
 }));
 
-jest.mock('expo-file-system', () => {
-  const mockFile = jest.fn().mockImplementation(() => ({
-    exists: true,
-    size: 1000,
-  }));
-  const mockUploadAsync = jest.fn().mockResolvedValue({ status: 200, body: '{}' });
-  const mockUploadTask = jest.fn().mockImplementation(() => ({
-    uploadAsync: mockUploadAsync,
-  }));
-  return {
-    File: mockFile,
-    UploadTask: mockUploadTask,
-    UploadType: { BINARY_CONTENT: 0 },
-  };
-});
+jest.mock('expo-file-system/legacy', () => ({
+  readAsStringAsync: jest.fn().mockResolvedValue('dGVzdA=='),
+  EncodingType: { Base64: 'base64' },
+}));
 
 describe('Body Scan E2E', () => {
   beforeEach(() => {

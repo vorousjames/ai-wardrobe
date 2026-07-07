@@ -1,25 +1,32 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { File, UploadTask, UploadType } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/authContext';
 import { useNavigation } from '@react-navigation/native';
 
 type ScanPhase = 'instructions' | 'camera' | 'uploading';
 
+// Decode base64 to Uint8Array (React Native compatible)
+function decodeBase64(base64: string): Uint8Array {
+  const binaryStr = atob(base64);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  return bytes;
+}
+
 export default function BodyScanScreen() {
   const [phase, setPhase] = useState<ScanPhase>('instructions');
   const [isRecording, setIsRecording] = useState(false);
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadStalled, setUploadStalled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<'front' | 'back'>('front');
   const cameraRef = useRef<CameraView>(null);
-  const uploadTaskRef = useRef<UploadTask | null>(null);
   const { session } = useAuth();
   const navigation = useNavigation();
 
@@ -93,53 +100,22 @@ export default function BodyScanScreen() {
     setUploadProgress(0);
     setUploadStalled(false);
 
-    // Timeout: auto-cancel after 3 minutes
-    let timedOut = false;
-    const timeoutTimer = setTimeout(() => {
-      timedOut = true;
-      setUploadStalled(true);
-    }, 180000);
-
     try {
       const fileName = `body-scan/${session.user.id}/${Date.now()}.mp4`;
 
-      const videoFile = new File(videoUri);
-      if (!videoFile.exists) throw new Error('Video file not found');
-
-      const supabaseUrl = 'https://tmcfiscdluwwpkcaeyky.supabase.co';
-      const uploadUrl = `${supabaseUrl}/storage/v1/object/body-scans/${fileName}`;
-
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      const accessToken = currentSession?.access_token;
-      if (!accessToken) throw new Error('Not authenticated');
-
-      const task = new UploadTask(videoFile, uploadUrl, {
-        httpMethod: 'PUT',
-        uploadType: UploadType.BINARY_CONTENT,
-        mimeType: 'video/mp4',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'video/mp4',
-          'x-upsert': 'true',
-        },
-        onProgress: (progress) => {
-          const pct = progress.totalBytes > 0
-            ? Math.round((progress.bytesSent / progress.totalBytes) * 100)
-            : 0;
-          setUploadProgress(pct);
-          setUploadStalled(false);
-        },
+      // Read file as base64, then upload via Supabase client
+      const base64 = await FileSystem.readAsStringAsync(videoUri, {
+        encoding: FileSystem.EncodingType.Base64,
       });
-      uploadTaskRef.current = task;
 
-      const uploadResult = await task.uploadAsync();
+      const { data, error } = await supabase.storage
+        .from('body-scans')
+        .upload(fileName, decodeBase64(base64), {
+          contentType: 'video/mp4',
+          upsert: true,
+        });
 
-      if (timedOut) return;
-      clearTimeout(timeoutTimer);
-
-      if (uploadResult.status !== 200 && uploadResult.status !== 201) {
-        throw new Error(`Upload failed with status ${uploadResult.status}: ${uploadResult.body}`);
-      }
+      if (error) throw error;
 
       const { data: { publicUrl } } = supabase.storage
         .from('body-scans')
@@ -158,7 +134,6 @@ export default function BodyScanScreen() {
 
       navigation.navigate('ScanProgress' as never);
     } catch (err) {
-      clearTimeout(timeoutTimer);
       const msg = err instanceof Error ? err.message : 'Upload failed';
       setError(msg);
       setPhase('camera');
@@ -166,16 +141,6 @@ export default function BodyScanScreen() {
       Alert.alert('Upload Error', msg);
     }
   }, [session, videoUri, navigation]);
-
-  const cancelUpload = useCallback(() => {
-    uploadTaskRef.current = null;
-    setPhase('camera');
-    setVideoUri(null);
-    setIsUploading(false);
-    setUploadProgress(0);
-    setUploadStalled(false);
-    setError(null);
-  }, []);
 
   if (phase === 'camera' && permission?.granted) {
     return (
@@ -237,20 +202,6 @@ export default function BodyScanScreen() {
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#007AFF" />
         <Text style={styles.uploadingText}>Uploading your scan...</Text>
-        {uploadProgress > 0 && (
-          <>
-            <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${uploadProgress}%` }]} />
-            </View>
-            <Text style={styles.progressText}>{uploadProgress}%</Text>
-          </>
-        )}
-        {uploadStalled && (
-          <Text style={styles.stalledText}>Upload seems slow. You can wait or cancel.</Text>
-        )}
-        <TouchableOpacity style={styles.cancelButton} onPress={cancelUpload}>
-          <Text style={styles.cancelButtonText}>Cancel</Text>
-        </TouchableOpacity>
       </View>
     );
   }
@@ -477,45 +428,5 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
-  },
-  progressBar: {
-    width: '80%',
-    height: 8,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 4,
-    marginTop: 20,
-    overflow: 'hidden',
-    alignSelf: 'center',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#007AFF',
-    borderRadius: 4,
-  },
-  progressText: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  stalledText: {
-    fontSize: 14,
-    color: '#ff9500',
-    marginTop: 16,
-    textAlign: 'center',
-  },
-  cancelButton: {
-    marginTop: 24,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    alignSelf: 'center',
-  },
-  cancelButtonText: {
-    color: '#666',
-    fontSize: 14,
-    fontWeight: '600',
   },
 });
