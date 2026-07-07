@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, Alert } from 'react-native';
+import * as Updates from 'expo-updates';
 import LoginScreen from './app/auth/LoginScreen';
 import SignUpScreen from './app/auth/SignUpScreen';
 import WardrobeScreen from './app/tabs/WardrobeScreen';
@@ -174,6 +175,19 @@ function RootNavigator() {
 }
 
 export default function App() {
+  // Silent OTA check on every cold start — works regardless of native config
+  useEffect(() => {
+    (async () => {
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          await Updates.reloadAsync();
+        }
+      } catch {}
+    })();
+  }, []);
+
   return (
     <AuthProvider>
       <RootNavigator />
