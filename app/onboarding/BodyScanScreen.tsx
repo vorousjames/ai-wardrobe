@@ -117,8 +117,6 @@ export default function BodyScanScreen() {
         throw new Error(`Upload failed with status ${uploadResult.status}`);
       }
 
-      if (uploadError) throw uploadError;
-
       const { data: { publicUrl } } = supabase.storage
         .from('body-scans')
         .getPublicUrl(fileName);
