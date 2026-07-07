@@ -13,6 +13,7 @@ export default function BodyScanScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<'front' | 'back'>('front');
@@ -110,6 +111,12 @@ export default function BodyScanScreen() {
           'Content-Type': 'video/mp4',
           'x-upsert': 'true',
         },
+        onProgress: (progress) => {
+          const pct = progress.totalBytes > 0
+            ? Math.round((progress.bytesSent / progress.totalBytes) * 100)
+            : 0;
+          setUploadProgress(pct);
+        },
       });
 
       const uploadResult = await task.uploadAsync();
@@ -203,6 +210,14 @@ export default function BodyScanScreen() {
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#007AFF" />
         <Text style={styles.uploadingText}>Uploading your scan...</Text>
+        {uploadProgress > 0 && (
+          <>
+            <View style={styles.progressBar}>
+              <View style={[styles.progressFill, { width: `${uploadProgress}%` }]} />
+            </View>
+            <Text style={styles.progressText}>{uploadProgress}%</Text>
+          </>
+        )}
       </View>
     );
   }
@@ -429,5 +444,25 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  progressBar: {
+    width: '80%',
+    height: 8,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+    marginTop: 20,
+    overflow: 'hidden',
+    alignSelf: 'center',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#007AFF',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
   },
 });
