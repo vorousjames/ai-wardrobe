@@ -103,18 +103,18 @@ export default function BodyScanScreen() {
       if (!accessToken) throw new Error('Not authenticated');
 
       const uploadResult = await FileSystem.uploadAsync(uploadUrl, videoUri, {
-        httpMethod: 'POST',
-        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'file',
+        httpMethod: 'PUT',
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
         mimeType: 'video/mp4',
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          'x-upsert': 'false',
+          'Content-Type': 'video/mp4',
+          'x-upsert': 'true',
         },
       });
 
-      if (uploadResult.status !== 200) {
-        throw new Error(`Upload failed with status ${uploadResult.status}`);
+      if (uploadResult.status !== 200 && uploadResult.status !== 201) {
+        throw new Error(`Upload failed with status ${uploadResult.status}: ${uploadResult.body}`);
       }
 
       const { data: { publicUrl } } = supabase.storage
