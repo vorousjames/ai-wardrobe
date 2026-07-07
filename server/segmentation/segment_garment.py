@@ -1,274 +1,184 @@
 #!/usr/bin/env python3
 """
-Garment segmentation script using Segment Anything Model (SAM).
-Downloads garment image from Supabase Storage, segments the garment from background,
-and uploads the segmented image to Cloudflare R2.
+Garment segmentation pipeline using SAM (Segment Anything Model).
+Runs on HeavenScape VPS (68.183.151.153) — shared resource.
+
+Pipeline:
+1. Fetch garment with segmentation_status = 'not_started' from Supabase
+2. Download garment image
+3. Run SAM to segment garment from background
+4. Upload transparent PNG to R2 at segmented-garments/{user_id}/{garment_id}.png
+5. Update garment record with segmented_url and status
+
+Usage:
+  /root/ai-wardrobe-venv/bin/python3 segment_garment.py <garment_id>
+
+Environment:
+  SUPABASE_URL, SUPABASE_SERVICE_KEY
+  R2_ENDPOINT, R2_ACCESS_KEY, R2_SECRET_KEY, R2_BUCKET_NAME
 """
 
 import os
 import sys
-import argparse
+import json
+import io
 import logging
-from typing import Optional, Tuple
-import urllib.request
-from io import BytesIO
+import requests
+from pathlib import Path
 
 import torch
-import cv2
 import numpy as np
 from PIL import Image
 import boto3
 from supabase import create_client
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from segment_anything import sam_model_registry, SamPredictor
 
-# Environment variables
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
-R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
-R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
-R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL")
+# ── Config ──────────────────────────────────────────────────────────────────
 
-# Segmentation status constants
-SEGMENTATION_STATUS = {
-    "NOT_STARTED": "not_started",
-    "PROCESSING": "processing",
-    "COMPLETE": "complete",
-    "FAILED": "failed"
-}
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://tmcfiscdluwwpkcaeyky.supabase.co")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+R2_ENDPOINT = os.getenv("R2_ENDPOINT")
+R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY")
+R2_SECRET_KEY = os.getenv("R2_SECRET_KEY")
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "commandra-prod")
 
-def download_image_from_supabase(image_url: str) -> Optional[Image.Image]:
-    """
-    Download image from Supabase Storage.
-    
-    Args:
-        image_url (str): URL of the image to download
-        
-    Returns:
-        Image.Image or None: Downloaded image or None if failed
-    """
-    try:
-        logger.info(f"Downloading image from: {image_url}")
-        with urllib.request.urlopen(image_url) as response:
-            image_data = response.read()
-        image = Image.open(BytesIO(image_data))
-        logger.info("Image downloaded successfully")
-        return image
-    except Exception as e:
-        logger.error(f"Failed to download image: {e}")
-        return None
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("garment-seg")
 
-def mock_segmentation(image: Image.Image) -> Image.Image:
-    """
-    Mock segmentation for testing purposes.
-    Creates a simple circular mask in the center of the image.
-    
-    Args:
-        image (Image.Image): Input image
-        
-    Returns:
-        Image.Image: Segmented image with transparent background
-    """
-    logger.info("Running mock segmentation")
-    # Convert to numpy array
-    img_array = np.array(image)
-    
-    # Create a circular mask in the center
-    h, w = img_array.shape[:2]
-    center = (w // 2, h // 2)
-    radius = min(h, w) // 3
-    mask = np.zeros((h, w), dtype=np.uint8)
-    cv2.circle(mask, center, radius, 255, -1)
-    
-    # Apply mask to image
-    if img_array.shape[2] == 3:  # RGB
-        rgba_image = cv2.cvtColor(img_array, cv2.COLOR_RGB2RGBA)
-    else:  # Already RGBA
-        rgba_image = img_array.copy()
-    
-    # Make background transparent
-    rgba_image[mask == 0, 3] = 0
-    
-    # Convert back to PIL Image
-    segmented_image = Image.fromarray(rgba_image, 'RGBA')
-    return segmented_image
+MODEL_PATH = "/root/ai-wardrobe/sam_vit_b.pth"
 
-def segment_garment_with_sam(image: Image.Image) -> Image.Image:
-    """
-    Segment garment using Segment Anything Model (SAM).
-    For MVP, we're using mock segmentation.
-    
-    Args:
-        image (Image.Image): Input image
-        
-    Returns:
-        Image.Image: Segmented image with transparent background
-    """
-    # In a full implementation, we would:
-    # 1. Load the SAM model
-    # 2. Preprocess the image
-    # 3. Run SAM inference
-    # 4. Post-process the mask
-    # 5. Apply mask to create transparent background
-    
-    # For MVP, use mock segmentation
-    return mock_segmentation(image)
+# ── SAM Setup ──────────────────────────────────────────────────────────────
 
-def upload_to_r2(image: Image.Image, garment_id: str) -> Optional[str]:
-    """
-    Upload segmented image to Cloudflare R2.
-    
-    Args:
-        image (Image.Image): Segmented image to upload
-        garment_id (str): ID of the garment
-        
-    Returns:
-        str or None: URL of uploaded image or None if failed
-    """
-    try:
-        logger.info("Uploading segmented image to R2")
-        
-        # Create R2 client
-        s3_client = boto3.client(
-            's3',
-            endpoint_url=R2_ENDPOINT_URL,
-            aws_access_key_id=R2_ACCESS_KEY_ID,
-            aws_secret_access_key=R2_SECRET_ACCESS_KEY
-        )
-        
-        # Convert image to bytes
-        img_buffer = BytesIO()
-        image.save(img_buffer, format='PNG')
-        img_buffer.seek(0)
-        
-        # Upload to R2
-        key = f"segmented/{garment_id}.png"
-        s3_client.upload_fileobj(img_buffer, R2_BUCKET_NAME, key)
-        
-        # Return the URL of the uploaded image
-        r2_url = f"{R2_ENDPOINT_URL}/{R2_BUCKET_NAME}/{key}"
-        logger.info(f"Image uploaded successfully to: {r2_url}")
-        return r2_url
-    except Exception as e:
-        logger.error(f"Failed to upload image to R2: {e}")
-        return None
+_predictor = None
 
-def update_garment_segmentation_status(garment_id: str, status: str, segmented_url: Optional[str] = None) -> bool:
-    """
-    Update garment segmentation status in the database.
-    
-    Args:
-        garment_id (str): ID of the garment
-        status (str): Segmentation status
-        segmented_url (str, optional): URL of segmented image
-        
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    try:
-        logger.info(f"Updating garment {garment_id} segmentation status to: {status}")
-        
-        # Create Supabase client
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        
-        # Update garment record
-        update_data = {"segmentation_status": status}
-        if segmented_url:
-            update_data["segmented_url"] = segmented_url
-            
-        response = supabase.table("garments").update(update_data).eq("id", garment_id).execute()
-        
-        if response.data:
-            logger.info("Garment segmentation status updated successfully")
-            return True
-        else:
-            logger.error("Failed to update garment segmentation status")
-            return False
-    except Exception as e:
-        logger.error(f"Error updating garment segmentation status: {e}")
-        return False
+def get_predictor():
+    global _predictor
+    if _predictor is None:
+        logger.info("Loading SAM model...")
+        sam = sam_model_registry["vit_b"](checkpoint=MODEL_PATH)
+        sam.to("cpu")
+        _predictor = SamPredictor(sam)
+        logger.info("SAM model loaded")
+    return _predictor
 
-def process_garment_segmentation(garment_image_url: str, garment_id: str, mock_mode: bool = False) -> bool:
-    """
-    Process garment segmentation pipeline.
-    
-    Args:
-        garment_image_url (str): URL of the garment image
-        garment_id (str): ID of the garment
-        mock_mode (bool): Whether to use mock segmentation (for testing)
-        
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    try:
-        # Update status to processing
-        update_garment_segmentation_status(garment_id, SEGMENTATION_STATUS["PROCESSING"])
-        
-        # Download image from Supabase Storage
-        image = download_image_from_supabase(garment_image_url)
-        if image is None:
-            update_garment_segmentation_status(garment_id, SEGMENTATION_STATUS["FAILED"])
-            return False
-        
-        # Run segmentation (mock for MVP)
-        segmented_image = segment_garment_with_sam(image) if not mock_mode else mock_segmentation(image)
-        
-        # Upload segmented image to R2
-        segmented_url = upload_to_r2(segmented_image, garment_id)
-        if segmented_url is None:
-            update_garment_segmentation_status(garment_id, SEGMENTATION_STATUS["FAILED"])
-            return False
-        
-        # Update database with segmented URL and status
-        success = update_garment_segmentation_status(
-            garment_id, 
-            SEGMENTATION_STATUS["COMPLETE"], 
-            segmented_url
-        )
-        
-        return success
-    except Exception as e:
-        logger.error(f"Error processing garment segmentation: {e}")
-        update_garment_segmentation_status(garment_id, SEGMENTATION_STATUS["FAILED"])
-        return False
 
-def main():
-    """Main entry point for the segmentation script."""
-    parser = argparse.ArgumentParser(description="Segment garment from background")
-    parser.add_argument("--image-url", required=True, help="URL of the garment image")
-    parser.add_argument("--garment-id", required=True, help="ID of the garment")
-    parser.add_argument("--mock", action="store_true", help="Use mock segmentation for testing")
-    
-    args = parser.parse_args()
-    
-    # Validate environment variables
-    required_env_vars = [
-        "SUPABASE_URL", "SUPABASE_KEY", 
-        "R2_BUCKET_NAME", "R2_ACCESS_KEY_ID", 
-        "R2_SECRET_ACCESS_KEY", "R2_ENDPOINT_URL"
-    ]
-    
-    missing_env_vars = [var for var in required_env_vars if not os.getenv(var)]
-    if missing_env_vars:
-        logger.error(f"Missing environment variables: {missing_env_vars}")
-        sys.exit(1)
-    
-    # Process garment segmentation
-    success = process_garment_segmentation(
-        args.image_url, 
-        args.garment_id, 
-        args.mock
+# ── Segmentation ───────────────────────────────────────────────────────────
+
+def segment_garment(image: Image.Image) -> Image.Image:
+    """Run SAM on the garment image and return a transparent PNG."""
+    predictor = get_predictor()
+
+    # Convert PIL to numpy RGB
+    img_np = np.array(image.convert("RGB"))
+
+    # SAM expects the image
+    predictor.set_image(img_np)
+
+    # Use a center point prompt to tell SAM to segment the main object
+    h, w = img_np.shape[:2]
+    input_point = np.array([[w // 2, h // 2]])
+    input_label = np.array([1])  # foreground
+
+    masks, scores, _ = predictor.predict(
+        point_coords=input_point,
+        point_labels=input_label,
+        multimask_output=True,
     )
-    
-    if success:
-        logger.info("Garment segmentation completed successfully")
-        sys.exit(0)
-    else:
-        logger.error("Garment segmentation failed")
+
+    # Pick the best mask (highest score)
+    best_idx = int(np.argmax(scores))
+    mask = masks[best_idx]
+
+    # Apply mask to create RGBA with transparent background
+    rgba = np.concatenate([img_np, np.zeros((h, w, 1), dtype=np.uint8)], axis=2)
+    rgba[mask, 3] = 255
+
+    return Image.fromarray(rgba, "RGBA")
+
+
+# ── Upload to R2 ──────────────────────────────────────────────────────────
+
+def upload_to_r2(image: Image.Image, user_id: str, garment_id: str) -> str:
+    """Upload segmented PNG to R2 and return the public URL."""
+    key = f"segmented-garments/{user_id}/{garment_id}.png"
+
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    buf.seek(0)
+
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=R2_ENDPOINT,
+        aws_access_key_id=R2_ACCESS_KEY,
+        aws_secret_access_key=R2_SECRET_KEY,
+    )
+    s3.upload_fileobj(buf, R2_BUCKET_NAME, key, ExtraArgs={"ContentType": "image/png"})
+
+    public_url = f"https://pub-ccd05115df2b4bd88d357ffb23364d05.r2.dev/{key}"
+    logger.info(f"Uploaded to {public_url}")
+    return public_url
+
+
+# ── Main ───────────────────────────────────────────────────────────────────
+
+def main(garment_id: str):
+    logger.info(f"=== Starting garment segmentation ===")
+    logger.info(f"Garment ID: {garment_id}")
+
+    if not SUPABASE_SERVICE_KEY:
+        logger.error("SUPABASE_SERVICE_KEY not set")
         sys.exit(1)
+
+    supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+    # Fetch garment record
+    result = supabase.table("garments").select("*").eq("id", garment_id).single().execute()
+    garment = result.data
+    if not garment:
+        logger.error(f"Garment {garment_id} not found")
+        sys.exit(1)
+
+    user_id = garment["user_id"]
+    image_url = garment["image_url"]
+
+    # Mark as processing
+    supabase.table("garments").update({"segmentation_status": "processing"}).eq("id", garment_id).execute()
+    logger.info("Status set to processing")
+
+    try:
+        # Download image
+        logger.info(f"Downloading image from {image_url}")
+        resp = requests.get(image_url, timeout=30)
+        resp.raise_for_status()
+        img_data = resp.content
+        image = Image.open(io.BytesIO(img_data))
+        logger.info(f"Image downloaded: {image.size}")
+
+        # Run SAM segmentation
+        segmented = segment_garment(image)
+
+        # Upload to R2
+        segmented_url = upload_to_r2(segmented, user_id, garment_id)
+
+        # Update garment record
+        supabase.table("garments").update({
+            "segmentation_status": "complete",
+            "segmented_url": segmented_url,
+        }).eq("id", garment_id).execute()
+
+        logger.info("=== Garment segmentation completed ===")
+
+    except Exception as e:
+        logger.exception("Segmentation failed")
+        supabase.table("garments").update({
+            "segmentation_status": "failed",
+        }).eq("id", garment_id).execute()
+        sys.exit(1)
+
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) < 2:
+        print("Usage: python3 segment_garment.py <garment_id>")
+        sys.exit(1)
+    main(sys.argv[1])
