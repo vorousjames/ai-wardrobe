@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/authContext';
 import { useNavigation } from '@react-navigation/native';
@@ -91,14 +92,16 @@ export default function GarmentUploadScreen({ navigation }: { navigation: any })
     setLoading(true);
 
     try {
-      // Upload image to Supabase Storage
-      const response = await fetch(image);
-      const blob = await response.blob();
+      // Upload image to Supabase Storage using expo-file-system
       const fileName = `${session.user.id}/${Date.now()}.jpg`;
-      
+      const base64 = await FileSystem.readAsStringAsync(image, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const byteArray = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+
       const { error: uploadError } = await supabase.storage
         .from('garments')
-        .upload(fileName, blob);
+        .upload(fileName, byteArray, { contentType: 'image/jpeg', upsert: true });
 
       if (uploadError) {
         throw new Error(`Upload failed: ${uploadError.message || 'Unknown error'}`);
