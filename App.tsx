@@ -2,8 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, Alert, View, ActivityIndicator, StyleSheet } from 'react-native';
-import * as Updates from 'expo-updates';
+import { Text } from 'react-native';
 import LoginScreen from './app/auth/LoginScreen';
 import SignUpScreen from './app/auth/SignUpScreen';
 import WardrobeScreen from './app/tabs/WardrobeScreen';
@@ -175,68 +174,9 @@ function RootNavigator() {
 }
 
 export default function App() {
-  const [otaStatus, setOtaStatus] = useState<'checking' | 'ready' | 'done'>('checking');
-  const [otaMessage, setOtaMessage] = useState('Checking for updates...');
-
-  // OTA check on every cold start — visible so you know it's running
-  useEffect(() => {
-    (async () => {
-      try {
-        setOtaMessage('Checking for updates...');
-        const update = await Updates.checkForUpdateAsync();
-        if (update.isAvailable) {
-          setOtaMessage('Downloading update...');
-          await Updates.fetchUpdateAsync();
-          setOtaMessage('Applying update...');
-          await Updates.reloadAsync();
-        } else {
-          setOtaMessage('App is up to date');
-          await new Promise(r => setTimeout(r, 800));
-          setOtaStatus('done');
-        }
-      } catch {
-        // Network error or updates disabled — proceed to app
-        setOtaStatus('done');
-      }
-    })();
-  }, []);
-
-  if (otaStatus === 'checking') {
-    return (
-      <View style={styles.otaContainer}>
-        <Text style={styles.otaTitle}>ai-wardrobe</Text>
-        <ActivityIndicator size="large" color="#007AFF" style={styles.otaSpinner} />
-        <Text style={styles.otaMessage}>{otaMessage}</Text>
-      </View>
-    );
-  }
-
   return (
     <AuthProvider>
       <RootNavigator />
     </AuthProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  otaContainer: {
-    flex: 1,
-    backgroundColor: 'white',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  otaTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 30,
-  },
-  otaSpinner: {
-    marginBottom: 20,
-  },
-  otaMessage: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-  },
-});
