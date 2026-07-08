@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import * as Updates from 'expo-updates';
+import { nativeBuildVersion } from 'expo-application';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/authContext';
 
@@ -102,6 +103,9 @@ export default function ProfileScreen() {
 
       {/* Version Info */}
       <View style={styles.versionContainer}>
+        <Text style={styles.versionText}>
+          Build: {nativeBuildVersion || 'N/A'}
+        </Text>
         <Text style={styles.versionText}>
           Runtime: {Updates.runtimeVersion || 'N/A'}
         </Text>
