@@ -151,13 +151,27 @@ export default function GarmentDetailScreen({ navigation }: { navigation: any })
   return (
     <ScrollView style={styles.container}>
       <View style={styles.imageContainer}>
-        <Image source={{ uri: garment.image_url }} style={styles.garmentImage} resizeMode="contain" />
+        <Image source={{ uri: garment.segmented_url || garment.image_url }} style={styles.garmentImage} resizeMode="contain" />
+        {garment.segmentation_status === 'not_started' || garment.segmentation_status === 'processing' ? (
+          <View style={styles.processingOverlay}>
+            <ActivityIndicator size="small" color="white" />
+            <Text style={styles.processingText}>Processing...</Text>
+          </View>
+        ) : garment.segmentation_status === 'failed' ? (
+          <View style={styles.failedOverlay}>
+            <Text style={styles.failedText}>Segmentation Failed</Text>
+          </View>
+        ) : null}
         <View style={[styles.typeBadge, { backgroundColor: getTypeColor(garment.type) }]}>
           <Text style={styles.typeBadgeText}>{garment.type}</Text>
         </View>
       </View>
 
       <View style={styles.content}>
+        {garment.segmentation_status === 'complete' && (
+          <Text style={styles.segmentedBadge}>✓ Background removed</Text>
+        )}
+
         {editing ? (
           <>
             <TextInput
@@ -295,6 +309,35 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     textTransform: 'uppercase',
+  },
+  processingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  processingText: {
+    color: 'white',
+    fontSize: 14,
+    marginTop: 4,
+  },
+  failedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255,59,48,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  failedText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  segmentedBadge: {
+    fontSize: 14,
+    color: '#34C759',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 20,
   },
   content: {
     padding: 20,

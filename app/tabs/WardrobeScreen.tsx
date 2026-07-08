@@ -56,28 +56,45 @@ export default function WardrobeScreen({ navigation }: { navigation: any }) {
     fetchGarments();
   }, [fetchGarments]);
 
-  const renderGarmentItem = ({ item }: { item: Garment }) => (
-    <TouchableOpacity
-      style={styles.garmentCard}
-      onPress={() => navigation.navigate('GarmentDetail', { id: item.id })}
-    >
-      <View style={styles.imageContainer}>
-        <Image 
-          source={{ uri: item.image_url }} 
-          style={styles.garmentImage} 
-          contentFit="cover"
-          placeholder={{ blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' }}
-          transition={200}
-        />
-        <View style={[styles.typeBadge, { backgroundColor: getTypeColor(item.type) }]}>
-          <Text style={styles.typeBadgeText}>{item.type}</Text>
+  const renderGarmentItem = ({ item }: { item: Garment }) => {
+    const displayUrl = item.segmented_url || item.image_url;
+    const isProcessing = item.segmentation_status === 'not_started' || item.segmentation_status === 'processing';
+    const isFailed = item.segmentation_status === 'failed';
+
+    return (
+      <TouchableOpacity
+        style={styles.garmentCard}
+        onPress={() => navigation.navigate('GarmentDetail', { id: item.id })}
+      >
+        <View style={styles.imageContainer}>
+          <Image 
+            source={{ uri: displayUrl }} 
+            style={styles.garmentImage} 
+            contentFit="cover"
+            placeholder={{ blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' }}
+            transition={200}
+          />
+          {isProcessing && (
+            <View style={styles.processingOverlay}>
+              <ActivityIndicator size="small" color="white" />
+              <Text style={styles.processingText}>Processing...</Text>
+            </View>
+          )}
+          {isFailed && (
+            <View style={styles.failedOverlay}>
+              <Text style={styles.failedText}>Failed</Text>
+            </View>
+          )}
+          <View style={[styles.typeBadge, { backgroundColor: getTypeColor(item.type) }]}>
+            <Text style={styles.typeBadgeText}>{item.type}</Text>
+          </View>
         </View>
-      </View>
-      <Text style={styles.nickname} numberOfLines={1} ellipsizeMode="tail">
-        {item.nickname || 'Unnamed Garment'}
-      </Text>
-    </TouchableOpacity>
-  );
+        <Text style={styles.nickname} numberOfLines={1} ellipsizeMode="tail">
+          {item.nickname || 'Unnamed Garment'}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
 
   const getTypeColor = (type: string) => {
     const colors: Record<string, string> = {
@@ -225,6 +242,32 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: 'bold',
     textTransform: 'uppercase',
+  },
+  processingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+  },
+  processingText: {
+    color: 'white',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  failedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255,59,48,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+  },
+  failedText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   nickname: {
     padding: 10,
